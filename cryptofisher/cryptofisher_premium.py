@@ -128,13 +128,31 @@ class CFSess:
         )
         self.s.cookies.set("PHPSESSID", phpsessid, domain="cryptofisher.online")
 
+    def _request(self, method: str, path: str, **kw) -> Any:
+        """GET/POST dengan retry — CF suka RemoteDisconnected sesaat
+        (bukti 2026-11-10: empty_backpack mati job Actions setelah 23m)."""
+        url = BASE + "/" + path.lstrip("/")
+        err: Optional[BaseException] = None
+        for i in range(3):
+            try:
+                if method == "GET":
+                    r = self.s.get(url, timeout=30, **kw)
+                else:
+                    r = self.s.post(url, timeout=30, **kw)
+                return self._parse(r)
+            except (requests.RequestException, ConnectionError, OSError) as e:
+                err = e
+                wait = 2 * (i + 1)
+                log(f"  net blip ({type(e).__name__}) try {i + 1}/3 — tunggu {wait}s")
+                time.sleep(wait)
+        log(f"  net gagal setelah 3x: {err}")
+        return {"success": False, "error": f"network: {err}", "_net": True}
+
     def get(self, path: str, **kw) -> Any:
-        r = self.s.get(BASE + "/" + path.lstrip("/"), timeout=30, **kw)
-        return self._parse(r)
+        return self._request("GET", path, **kw)
 
     def post(self, path: str, data: Optional[dict] = None, **kw) -> Any:
-        r = self.s.post(BASE + "/" + path.lstrip("/"), data=data or {}, timeout=30, **kw)
-        return self._parse(r)
+        return self._request("POST", path, data=data or {}, **kw)
 
     def post_action(self, action: str, **fields) -> Any:
         body = {"action": action}
@@ -272,22 +290,26 @@ def empty_backpack(cf: CFSess, st: dict) -> tuple[int, int]:
         iid = it.get("id")
         if iid is None:
             continue
-        if it.get("item_type") == "crypto":
-            resp = cf.post("ajax.php?action=deposit_crypto", data={"item_id": iid})
-            if resp.get("success") or not resp.get("error"):
-                dep += 1
-                log(f"  deposit: {it.get('item_name')} +{it.get('amount')}")
+        try:
+            if it.get("item_type") == "crypto":
+                resp = cf.post("ajax.php?action=deposit_crypto", data={"item_id": iid})
+                if resp.get("success") or not resp.get("error"):
+                    dep += 1
+                    log(f"  deposit: {it.get('item_name')} +{it.get('amount')}")
+                else:
+                    log(f"  deposit GAGAL: {resp}")
             else:
-                log(f"  deposit GAGAL: {resp}")
-        else:
-            resp = cf.post("ajax.php?action=discard_item", data={"item_id": iid})
-            if resp.get("success") or not resp.get("error"):
-                rec += 1
-                amt = float(it.get("amount") or 0)
-                label = f"+{amt:.8f} USDT" if amt > 0 else "worthless"
-                log(f"  recycle: {it.get('item_name')} ({label})")
-            else:
-                log(f"  recycle GAGAL: {resp}")
+                resp = cf.post("ajax.php?action=discard_item", data={"item_id": iid})
+                if resp.get("success") or not resp.get("error"):
+                    rec += 1
+                    amt = float(it.get("amount") or 0)
+                    label = f"+{amt:.8f} USDT" if amt > 0 else "worthless"
+                    log(f"  recycle: {it.get('item_name')} ({label})")
+                else:
+                    log(f"  recycle GAGAL: {resp}")
+        except (requests.RequestException, ConnectionError, OSError) as e:
+            # 1 item blip jangan batalkan seluruh kantong / matikan bot
+            log(f"  item skip (net): {type(e).__name__}: {e}")
         sleep_humans(0.3, 0.15)
     return dep, rec
 

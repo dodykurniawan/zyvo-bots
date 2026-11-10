@@ -1,0 +1,12 @@
+name = "zyvo-balance"
+main = "index.js"
+compatibility_date = "2026-11-10"
+
+# Secret dipasang terpisah (JANGAN tulis di sini):
+#   wrangler secret put TG_BOT_TOKEN
+#   wrangler secret put TG_CHAT_ID
+#   wrangler secret put WEBHOOK_SECRET
+#   wrangler secret put CF_EMAIL
+#   wrangler secret put CF_PASSWORD
+#   wrangler secret put CTD_COOKIE
+#   wrangler secret put LM_SESSION

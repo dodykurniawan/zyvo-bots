@@ -17,3 +17,6 @@ cryptotowerdefense/ctd_run.log
 # File lokal Termux
 .run_lock
 *.lock
+worker/.webhook_secret
+worker/.cf_token
+worker/.account_id

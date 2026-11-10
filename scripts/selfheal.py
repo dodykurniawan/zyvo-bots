@@ -87,6 +87,24 @@ def heal_cf() -> dict[str, Any]:
             f"lv{st.get('level')} exp={st.get('exp')} "
             f"USDT={float(b.get('USDT') or 0):.8f}"
         )
+        # sinkronkan sid hidup ke SEMUA config (Actions repo + Termux sites/)
+        for cfg_out in (
+            cfg_path,
+            "/storage/emulated/0/Download/ZYVO/sites/cryptofisher/cf_config.json",
+        ):
+            if not os.path.isfile(cfg_out):
+                continue
+            try:
+                cfg = json.load(open(cfg_out))
+            except Exception:
+                continue
+            if cfg.get("phpsessid") != sid:
+                cfg["phpsessid"] = sid
+                try:
+                    json.dump(cfg, open(cfg_out, "w"), indent=2)
+                    out["actions"].append(f"sid sync → {cfg_out}")
+                except OSError:
+                    pass
         return out
 
     email = _env("CF_EMAIL")
@@ -152,14 +170,26 @@ def heal_cf() -> dict[str, Any]:
         out["error"] = f"re-login CF gagal: {data.get('error') or data}"
         return out
 
-    if os.path.isfile(cfg_path):
+    # tulis ke SEMUA lokasi config yang ada (Actions = repo; Termux = sites/)
+    for cfg_out in (
+        cfg_path,
+        "/storage/emulated/0/Download/ZYVO/sites/cryptofisher/cf_config.json",
+    ):
+        if not os.path.isfile(cfg_out) and cfg_out != cfg_path:
+            continue
         try:
-            cfg = json.load(open(cfg_path))
+            if os.path.isfile(cfg_out):
+                cfg = json.load(open(cfg_out))
+            else:
+                cfg = {}
         except Exception:
             cfg = {}
         cfg["phpsessid"] = sid2
         cfg["email"] = email
-        json.dump(cfg, open(cfg_path, "w"), indent=2)
+        try:
+            json.dump(cfg, open(cfg_out, "w"), indent=2)
+        except OSError:
+            pass
     out["actions"].append("re-login dummy captcha OK")
     st2 = probe(sid2)
     out["ok"] = bool(st2.get("success"))

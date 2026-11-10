@@ -115,11 +115,17 @@ class Xsolve:
         self.key = key
 
     def solve(self, sitekey, url, action=None, cdata=None) -> str:
+        # xsolve kadang balas token langsung, kadang 600010 — retry 1x dulu
         try:
             return self._xsolve(sitekey, url, action, cdata)
         except Exception as e:
-            log(f"xsolve gagal ({e}) → fallback peak")
-            return self._peak(sitekey, url, action, cdata)
+            log(f"xsolve gagal ({e}) → retry 1x")
+            try:
+                time.sleep(2)
+                return self._xsolve(sitekey, url, action, cdata)
+            except Exception as e2:
+                log(f"xsolve retry gagal ({e2}) → fallback peak")
+                return self._peak(sitekey, url, action, cdata)
 
     def _peak(self, sitekey, url, action=None, cdata=None) -> str:
         """Peak fallback (2026-11-09): xsolve rusak global, peak sehat."""
@@ -340,28 +346,42 @@ class CTD:
             # (O_EXCL lock + cek ps mencegah dobel launch)
             self.maybe_start_run_bot()
             return True
+        # verify butuh x-csrf-token — refresh dari identity kalau kosong/basi
+        if not self.csrf:
+            ident = self.get("/api/session/identity")
+            self.csrf = ident.get("csrfToken") or self.csrf
         # perpanjang: challenge purpose=play -> xsolve -> verify
-        try:
-            ch = self._challenge(purpose)
-            tok = self.solver.solve(
-                ch["siteKey"], self.base + "/", ch.get("action") or purpose,
-                ch.get("cData") or ch.get("challengeId"))
-            r = self.post("/api/security/verify", {
-                "purpose": purpose,
-                "challengeId": ch["challengeId"],
-                "turnstileToken": tok,
-            })
-            until2 = int((r.get("status") or r).get("verifiedUntil") or 0) \
-                if isinstance(r.get("status") or r, dict) else 0
-            if until2 or r.get("status") == "active" or r.get("verifiedUntil"):
-                log("jendela verifikasi diperpanjang (xsolve)")
-                self.maybe_start_run_bot()
-                return True
-            log(f"verify gagal: {r}")
-            return False
-        except RuntimeError as e:
-            log(f"perpanjang verifikasi gagal: {e}")
-            return False
+        # 3x percobaan + challenge BARU tiap putaran (600010 sering challenge-specific)
+        last = ""
+        for attempt in range(3):
+            try:
+                ch = self._challenge(purpose)
+                tok = self.solver.solve(
+                    ch["siteKey"], self.base + "/", ch.get("action") or purpose,
+                    ch.get("cData") or ch.get("challengeId"))
+                r = self.post("/api/security/verify", {
+                    "purpose": purpose,
+                    "challengeId": ch["challengeId"],
+                    "turnstileToken": tok,
+                })
+                until2 = int((r.get("status") or r).get("verifiedUntil") or 0) \
+                    if isinstance(r.get("status") or r, dict) else 0
+                if until2 or r.get("status") == "active" or r.get("verifiedUntil"):
+                    log("jendela verifikasi diperpanjang (xsolve)")
+                    self.maybe_start_run_bot()
+                    return True
+                last = str(r)[:200]
+                log(f"verify gagal (try {attempt + 1}/3): {last}")
+                # CSRF → ambil token baru lalu ulang
+                if "CSRF" in last.upper() or "Refresh the page" in last:
+                    ident = self.get("/api/session/identity")
+                    self.csrf = ident.get("csrfToken") or self.csrf
+            except RuntimeError as e:
+                last = str(e)
+                log(f"perpanjang gagal (try {attempt + 1}/3): {e}")
+            time.sleep(3 * (attempt + 1))
+        log(f"jendela verifikasi GAGAL setelah 3x: {last}")
+        return False
 
     # ---------------- Faucet ----------------
     def claim(self, kind) -> bool:
