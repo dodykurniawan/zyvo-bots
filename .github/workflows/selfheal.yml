@@ -1,0 +1,122 @@
+name: selfheal
+
+# Perbaikan otomatis harian tanpa perintah user:
+# cek situs hidup + sesi CF/CTD/LM → relogin kalau mati → lapor TG.
+# Kalau masih rusak setelah recovery, pesan TG bawa detail error
+# (site ganti API total = perlu patch zyvo, bukan tebak-tebak).
+on:
+  schedule:
+    # 03:17 UTC (~10:17 WIB) — di luar jendela bots 17 */6
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Situs'
+        type: choice
+        default: all
+        options:
+          - all
+          - cf
+          - ctd
+          - lm
+
+concurrency:
+  group: selfheal
+  cancel-in-progress: true
+
+jobs:
+  heal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -q requests
+
+      - name: Tulis config dari Secrets
+        env:
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_PASSWORD: ${{ secrets.CF_PASSWORD }}
+          CTD_EMAIL: ${{ secrets.CTD_EMAIL }}
+          CTD_PASSWORD: ${{ secrets.CTD_PASSWORD }}
+          CTD_COOKIE: ${{ secrets.CTD_COOKIE }}
+          LM_CONFIG_JSON: ${{ secrets.LM_CONFIG_JSON }}
+        run: |
+          mkdir -p cryptofisher cryptotowerdefense lightningminer
+          python3 - <<'PY'
+          import json, os
+          cfg = {
+              "email": os.environ.get("CF_EMAIL", ""),
+              "coin": "BTC", "wd_gateway": "faucetpay",
+              "wd_address": "dodykurniaw4n@gmail.com",
+              "wd_currency": "USDT", "wd_min_usd": 0.001,
+              "hold_wd_until_upgrade": False,
+              "hold_usdt_for_upgrade": True,
+              "auto_wd": True,
+          }
+          # phpsessid lama dari secret tidak ada — biarkan kosong, selfheal login
+          json.dump(cfg, open("cryptofisher/cf_config.json", "w"), indent=2)
+          open("cryptotowerdefense/ctd_cookie.txt", "w").write(
+              os.environ.get("CTD_COOKIE", ""))
+          open("cryptotowerdefense/ctd_email.txt", "w").write(
+              os.environ.get("CTD_EMAIL", ""))
+          open("cryptotowerdefense/ctd_secret.txt", "w").write(
+              os.environ.get("CTD_PASSWORD", ""))
+          c = json.loads(os.environ.get("LM_CONFIG_JSON") or "{}")
+          c.pop("local_ts_url", None); c.pop("local_hc_url", None)
+          json.dump(c, open("lightningminer/lm_config.json", "w"), indent=2)
+          print("config selfheal siap")
+          PY
+
+      - name: Self-heal (probe + relogin)
+        id: heal
+        env:
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_PASSWORD: ${{ secrets.CF_PASSWORD }}
+          CTD_EMAIL: ${{ secrets.CTD_EMAIL }}
+          CTD_PASSWORD: ${{ secrets.CTD_PASSWORD }}
+          LM_CONFIG_PATH: ${{ github.workspace }}/lightningminer/lm_config.json
+          ONLY: ${{ inputs.only || 'all' }}
+        run: |
+          set +e
+          ARGS=""
+          if [ "$ONLY" != "all" ]; then ARGS="--only $ONLY"; fi
+          python3 -u scripts/selfheal.py $ARGS | tee selfheal_out.txt
+          ec=$?
+          echo "exit=$ec"
+          echo "heal_exit=$ec" >> "$GITHUB_OUTPUT"
+          # tetap lanjut ke notifikasi; exit job = status heal
+          exit $ec
+
+      - name: Kirim status ke Telegram
+        if: always()
+        env:
+          TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT_ID }}
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_PASSWORD: ${{ secrets.CF_PASSWORD }}
+          CTD_COOKIE: ${{ secrets.CTD_COOKIE }}
+          LM_CONFIG_JSON: ${{ secrets.LM_CONFIG_JSON }}
+          HEAL_EXIT: ${{ steps.heal.outputs.heal_exit }}
+        run: |
+          [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ] && { echo "TG belum diset"; exit 0; }
+          DETAIL=$(grep -E "^(RESULT|  - )" selfheal_out.txt 2>/dev/null | tail -20 || true)
+          if [ "${HEAL_EXIT:-1}" = "0" ]; then
+            HEAD="🩺 Self-heal harian — SEMUA SEHAT"
+          else
+            HEAD="🩺 Self-heal harian — ADA MASALAH (sudah dicoba auto-repair)"
+          fi
+          BAL=$(python3 scripts/balance_all.py 2>/dev/null || true)
+          TEXT="$HEAD
+          $DETAIL
+          $BAL
+          🕐 $(date -u '+%Y-%m-%d %H:%M UTC')
+          🔗 ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TG_CHAT" \
+            --data-urlencode "text=$TEXT"

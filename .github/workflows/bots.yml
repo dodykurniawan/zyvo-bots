@@ -65,6 +65,12 @@ jobs:
           print("cf_config.json siap (password TIDAK ditulis ke file)")
           PY
 
+      - name: Self-heal CF (relogin kalau sesi mati)
+        env:
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_PASSWORD: ${{ secrets.CF_PASSWORD }}
+        run: python3 -u scripts/selfheal.py --only cf || true
+
       - name: Jalankan CF premium (level + auto WD)
         id: bot
         env:
@@ -75,12 +81,22 @@ jobs:
           set +e
           ARGS=""
           if [ "${{ inputs.test }}" = "true" ]; then ARGS="--once"; fi
-          # SIGINT → KeyboardInterrupt → cleanup rapi; 340 mnt < batas 360
-          # tanpa --ptc: PTC curi waktu mancing (fokus level)
-          timeout -s INT -k 60 340m python3 -u cryptofisher_premium.py --wd-every 15 $ARGS
+          run_bot() {
+            # SIGINT → KeyboardInterrupt → cleanup rapi; 340 mnt < batas 360
+            # tanpa --ptc: PTC curi waktu mancing (fokus level)
+            timeout -s INT -k 60 340m python3 -u cryptofisher_premium.py --wd-every 15 $ARGS
+          }
+          run_bot
           ec=$?
           echo "exit=$ec"
           # 124/130 = timeout/signal — bukan error bot
+          if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
+          # retry 1x setelah self-heal (sesi/error sementara)
+          echo "retry setelah self-heal…"
+          python3 -u ../scripts/selfheal.py --only cf || true
+          run_bot
+          ec=$?
+          echo "exit_retry=$ec"
           if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
           exit $ec
 
@@ -131,6 +147,8 @@ jobs:
           printf '%s' "$LM_CONFIG_JSON" > lightningminer/lm_config.json
           # cookie sesi lama — kalau masih valid, TIDAK perlu login Turnstile
           printf '%s' "$CTD_COOKIE" > cryptotowerdefense/ctd_cookie.txt
+          printf '%s' "$CTD_EMAIL" > cryptotowerdefense/ctd_email.txt
+          printf '%s' "$CTD_PASSWORD" > cryptotowerdefense/ctd_secret.txt
           python3 - <<'PY'
           import json
           p = "lightningminer/lm_config.json"
@@ -144,6 +162,13 @@ jobs:
           print("ctd_cookie.txt siap,", len(ck), "chars")
           PY
 
+      - name: Self-heal CTD (relogin kalau cookie mati)
+        env:
+          CTD_EMAIL: ${{ secrets.CTD_EMAIL }}
+          CTD_PASSWORD: ${{ secrets.CTD_PASSWORD }}
+          LM_CONFIG_PATH: ${{ github.workspace }}/lightningminer/lm_config.json
+        run: python3 -u scripts/selfheal.py --only ctd || true
+
       - name: Jalankan CTD
         id: bot
         env:
@@ -155,10 +180,21 @@ jobs:
           set +e
           ARGS=""
           if [ "${{ inputs.test }}" = "true" ]; then ARGS="--once"; fi
-          timeout -s INT -k 60 340m python3 -u ctd_auto.py $ARGS
+          run_bot() {
+            timeout -s INT -k 60 340m python3 -u ctd_auto.py $ARGS
+          }
+          run_bot
           ec=$?
           echo "exit=$ec"
-          # bersihkan anak process node kalau masih hidup
+          if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then
+            pkill -f ctd_run_bot.mjs 2>/dev/null || true
+            exit 0
+          fi
+          echo "retry setelah self-heal…"
+          python3 -u ../scripts/selfheal.py --only ctd || true
+          run_bot
+          ec=$?
+          echo "exit_retry=$ec"
           pkill -f ctd_run_bot.mjs 2>/dev/null || true
           if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
           exit $ec
@@ -212,16 +248,32 @@ jobs:
           print("lm_config.json siap untuk LM")
           PY
 
+      - name: Self-heal LM (relogin kalau sesi mati)
+        env:
+          LM_CONFIG_PATH: ${{ github.workspace }}/lightningminer/lm_config.json
+        run: python3 -u scripts/selfheal.py --only lm || true
+
       - name: Jalankan LightningMiner
         id: bot
+        env:
+          LM_CONFIG_PATH: ${{ github.workspace }}/lightningminer/lm_config.json
         working-directory: lightningminer
         run: |
           set +e
           ARGS=""
           if [ "${{ inputs.test }}" = "true" ]; then ARGS="--once"; fi
-          timeout -s INT -k 60 340m python3 -u lightningminer_auto.py --interval 180 $ARGS
+          run_bot() {
+            timeout -s INT -k 60 340m python3 -u lightningminer_auto.py --interval 180 $ARGS
+          }
+          run_bot
           ec=$?
           echo "exit=$ec"
+          if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
+          echo "retry setelah self-heal…"
+          python3 -u ../scripts/selfheal.py --only lm || true
+          run_bot
+          ec=$?
+          echo "exit_retry=$ec"
           if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
           exit $ec
 
