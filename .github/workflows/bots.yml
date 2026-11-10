@@ -56,6 +56,8 @@ jobs:
               "wd_currency": "USDT",
               "wd_min_usd": 0.001,
               "hold_wd_until_upgrade": False,
+              "hold_usdt_for_upgrade": True,
+              "auto_wd": True,
           }
           os.makedirs("cryptofisher", exist_ok=True)
           with open("cryptofisher/cf_config.json", "w") as f:
@@ -63,7 +65,7 @@ jobs:
           print("cf_config.json siap (password TIDAK ditulis ke file)")
           PY
 
-      - name: Jalankan CF level rush
+      - name: Jalankan CF premium (level + auto WD)
         id: bot
         env:
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
@@ -74,7 +76,8 @@ jobs:
           ARGS=""
           if [ "${{ inputs.test }}" = "true" ]; then ARGS="--once"; fi
           # SIGINT → KeyboardInterrupt → cleanup rapi; 340 mnt < batas 360
-          timeout -s INT -k 60 340m python3 -u cryptofisher_level.py --ptc $ARGS
+          # tanpa --ptc: PTC curi waktu mancing (fokus level)
+          timeout -s INT -k 60 340m python3 -u cryptofisher_premium.py --wd-every 15 $ARGS
           ec=$?
           echo "exit=$ec"
           # 124/130 = timeout/signal — bukan error bot
@@ -92,7 +95,7 @@ jobs:
           [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ] && { echo "TG belum diset"; exit 0; }
           if [ "${{ steps.bot.outcome }}" = "success" ]; then ST="✅ SUKSES"; else ST="❌ GAGAL"; fi
           BAL=$(python3 scripts/balance_all.py 2>/dev/null | head -3 || true)
-          TEXT="🤖 CF Level Rush — $ST
+          TEXT="🤖 CF Premium (level+WD) — $ST
           $BAL
           Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
