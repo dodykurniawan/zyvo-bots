@@ -86,10 +86,14 @@ jobs:
         env:
           TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT_ID }}
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_PASSWORD: ${{ secrets.CF_PASSWORD }}
         run: |
           [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ] && { echo "TG belum diset"; exit 0; }
           if [ "${{ steps.bot.outcome }}" = "success" ]; then ST="✅ SUKSES"; else ST="❌ GAGAL"; fi
+          BAL=$(python3 scripts/balance_all.py 2>/dev/null | head -3 || true)
           TEXT="🤖 CF Level Rush — $ST
+          $BAL
           Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
             --data-urlencode "chat_id=$TG_CHAT" \
@@ -161,10 +165,14 @@ jobs:
         env:
           TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT_ID }}
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_PASSWORD: ${{ secrets.CF_PASSWORD }}
         run: |
           [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ] && { echo "TG belum diset"; exit 0; }
           if [ "${{ steps.bot.outcome }}" = "success" ]; then ST="✅ SUKSES"; else ST="❌ GAGAL"; fi
+          BAL=$(python3 scripts/balance_all.py 2>/dev/null | head -3 || true)
           TEXT="🛡️ CryptoTowerDefense — $ST
+          $BAL
           Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
             --data-urlencode "chat_id=$TG_CHAT" \
@@ -219,10 +227,14 @@ jobs:
         env:
           TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT_ID }}
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_PASSWORD: ${{ secrets.CF_PASSWORD }}
         run: |
           [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ] && { echo "TG belum diset"; exit 0; }
           if [ "${{ steps.bot.outcome }}" = "success" ]; then ST="✅ SUKSES"; else ST="❌ GAGAL"; fi
+          BAL=$(python3 scripts/balance_all.py 2>/dev/null | head -3 || true)
           TEXT="⛏️ LightningMiner — $ST
+          $BAL
           Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
             --data-urlencode "chat_id=$TG_CHAT" \
@@ -235,10 +247,45 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps + config balance
+        env:
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_PASSWORD: ${{ secrets.CF_PASSWORD }}
+          CTD_COOKIE: ${{ secrets.CTD_COOKIE }}
+          LM_CONFIG_JSON: ${{ secrets.LM_CONFIG_JSON }}
+        run: |
+          pip install -q requests
+          mkdir -p cryptofisher cryptotowerdefense lightningminer
+          python3 - <<'PY'
+          import json, os
+          cfg = {
+              "email": os.environ.get("CF_EMAIL", ""),
+              "coin": "BTC", "wd_gateway": "faucetpay",
+              "wd_address": "dodykurniaw4n@gmail.com",
+              "wd_currency": "USDT", "wd_min_usd": 0.001,
+              "hold_wd_until_upgrade": False,
+          }
+          json.dump(cfg, open("cryptofisher/cf_config.json", "w"), indent=2)
+          open("cryptotowerdefense/ctd_cookie.txt", "w").write(
+              os.environ.get("CTD_COOKIE", ""))
+          c = json.loads(os.environ.get("LM_CONFIG_JSON") or "{}")
+          c.pop("local_ts_url", None); c.pop("local_hc_url", None)
+          json.dump(c, open("lightningminer/lm_config.json", "w"), indent=2)
+          print("config notify siap")
+          PY
+
       - name: Kirim ringkasan ke Telegram
         env:
           TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT_ID }}
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_PASSWORD: ${{ secrets.CF_PASSWORD }}
           R_CF: ${{ needs.cf.result }}
           R_CTD: ${{ needs.ctd.result }}
           R_LM: ${{ needs.lm.result }}
@@ -262,10 +309,12 @@ jobs:
           else
             HEAD="📊 Ringkasan zyvo-bots — ADA MASALAH"
           fi
+          BAL=$(python3 scripts/balance_all.py 2>/dev/null || true)
           TEXT="$HEAD
           🎣 CF: $(badge "$R_CF")
           🛡️ CTD: $(badge "$R_CTD")
           ⛏️ LM: $(badge "$R_LM")
+          $BAL
           🕐 $(date -u '+%Y-%m-%d %H:%M UTC')
           🔗 ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \

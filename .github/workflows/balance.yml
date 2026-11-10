@@ -1,0 +1,70 @@
+name: balance
+
+# Cek saldo via Telegram: polling getUpdates tiap 5 menit,
+# balas /balance · /saldo · /start dengan saldo CF+CTD+LM.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: balance-watch
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -q requests
+
+      - name: Tulis config dari Secrets
+        env:
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_PASSWORD: ${{ secrets.CF_PASSWORD }}
+          CTD_COOKIE: ${{ secrets.CTD_COOKIE }}
+          LM_CONFIG_JSON: ${{ secrets.LM_CONFIG_JSON }}
+        run: |
+          mkdir -p cryptofisher cryptotowerdefense lightningminer
+          python3 - <<'PY'
+          import json, os
+          cfg = {
+              "email": os.environ.get("CF_EMAIL", ""),
+              "coin": "BTC",
+              "wd_gateway": "faucetpay",
+              "wd_address": "dodykurniaw4n@gmail.com",
+              "wd_currency": "USDT",
+              "wd_min_usd": 0.001,
+              "hold_wd_until_upgrade": False,
+          }
+          json.dump(cfg, open("cryptofisher/cf_config.json", "w"), indent=2)
+          open("cryptotowerdefense/ctd_cookie.txt", "w").write(
+              os.environ.get("CTD_COOKIE", ""))
+          c = json.loads(os.environ.get("LM_CONFIG_JSON") or "{}")
+          c.pop("local_ts_url", None); c.pop("local_hc_url", None)
+          json.dump(c, open("lightningminer/lm_config.json", "w"), indent=2)
+          print("configs siap (CF login on-demand saat /balance)")
+          PY
+
+      - name: Restore offset Telegram
+        uses: actions/cache@v4
+        with:
+          path: tg_offset.txt
+          key: tg-offset-${{ github.run_id }}
+          restore-keys: |
+            tg-offset-
+
+      - name: Poll & balas /balance
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_PASSWORD: ${{ secrets.CF_PASSWORD }}
+        run: python3 scripts/tg_balance_watch.py
