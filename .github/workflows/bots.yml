@@ -1,0 +1,178 @@
+name: bots
+
+on:
+  schedule:
+    # tiap 6 jam (menit 17 — hindari padatnya menit-00)
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'Tes singkat (--once lalu keluar)'
+        type: boolean
+        default: false
+      only:
+        description: 'Jalankan bot mana saja'
+        type: choice
+        default: all
+        options:
+          - all
+          - cf
+          - ctd
+          - lm
+
+# Satu job per bot — jangan dobelkan job yang sama masih jalan
+concurrency:
+  group: ${{ github.workflow }}-${{ github.job }}
+  cancel-in-progress: false
+
+jobs:
+  cf:
+    if: inputs.only == 'all' || inputs.only == 'cf' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    # batas GitHub = 360 mnt; kita stop di 340 biar sempat cleanup
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -q requests
+
+      - name: Tulis config dari Secrets
+        env:
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_PASSWORD: ${{ secrets.CF_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          cfg = {
+              "email": os.environ.get("CF_EMAIL", ""),
+              "coin": "BTC",
+              "wd_gateway": "faucetpay",
+              "wd_address": "dodykurniaw4n@gmail.com",
+              "wd_currency": "USDT",
+              "wd_min_usd": 0.001,
+              "hold_wd_until_upgrade": False,
+          }
+          os.makedirs("cryptofisher", exist_ok=True)
+          with open("cryptofisher/cf_config.json", "w") as f:
+              json.dump(cfg, f, indent=2)
+          print("cf_config.json siap (password TIDAK ditulis ke file)")
+          PY
+
+      - name: Jalankan CF level rush
+        env:
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_PASSWORD: ${{ secrets.CF_PASSWORD }}
+        working-directory: cryptofisher
+        run: |
+          set +e
+          ARGS=""
+          if [ "${{ inputs.test }}" = "true" ]; then ARGS="--once"; fi
+          # SIGINT → KeyboardInterrupt → cleanup rapi; 340 mnt < batas 360
+          timeout -s INT -k 60 340m python3 -u cryptofisher_level.py --ptc $ARGS
+          ec=$?
+          echo "exit=$ec"
+          # 124/130 = timeout/signal — bukan error bot
+          if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
+          exit $ec
+
+  ctd:
+    if: inputs.only == 'all' || inputs.only == 'ctd' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        run: pip install -q requests
+
+      - name: Tulis config dari Secrets
+        env:
+          CTD_EMAIL: ${{ secrets.CTD_EMAIL }}
+          CTD_PASSWORD: ${{ secrets.CTD_PASSWORD }}
+          LM_CONFIG_JSON: ${{ secrets.LM_CONFIG_JSON }}
+        run: |
+          mkdir -p lightningminer cryptotowerdefense
+          printf '%s' "$LM_CONFIG_JSON" > lightningminer/lm_config.json
+          python3 - <<'PY'
+          import json
+          p = "lightningminer/lm_config.json"
+          c = json.load(open(p))
+          # solver lokal 127.0.0.1 tidak ada di Actions — buang biar cepat
+          c.pop("local_ts_url", None)
+          c.pop("local_hc_url", None)
+          json.dump(c, open(p, "w"), indent=2)
+          print("lm_config.json siap untuk CTD (xsolve/peak key)")
+          PY
+
+      - name: Jalankan CTD
+        env:
+          CTD_EMAIL: ${{ secrets.CTD_EMAIL }}
+          CTD_PASSWORD: ${{ secrets.CTD_PASSWORD }}
+          LM_CONFIG_PATH: ${{ github.workspace }}/lightningminer/lm_config.json
+        working-directory: cryptotowerdefense
+        run: |
+          set +e
+          ARGS=""
+          if [ "${{ inputs.test }}" = "true" ]; then ARGS="--once"; fi
+          timeout -s INT -k 60 340m python3 -u ctd_auto.py $ARGS
+          ec=$?
+          echo "exit=$ec"
+          # bersihkan anak process node kalau masih hidup
+          pkill -f ctd_run_bot.mjs 2>/dev/null || true
+          if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
+          exit $ec
+
+  lm:
+    if: inputs.only == 'all' || inputs.only == 'lm' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -q requests
+
+      - name: Tulis config dari Secrets
+        env:
+          LM_CONFIG_JSON: ${{ secrets.LM_CONFIG_JSON }}
+        run: |
+          mkdir -p lightningminer
+          printf '%s' "$LM_CONFIG_JSON" > lightningminer/lm_config.json
+          python3 - <<'PY'
+          import json
+          p = "lightningminer/lm_config.json"
+          c = json.load(open(p))
+          c.pop("local_ts_url", None)
+          c.pop("local_hc_url", None)
+          json.dump(c, open(p, "w"), indent=2)
+          print("lm_config.json siap untuk LM")
+          PY
+
+      - name: Jalankan LightningMiner
+        working-directory: lightningminer
+        run: |
+          set +e
+          ARGS=""
+          if [ "${{ inputs.test }}" = "true" ]; then ARGS="--once"; fi
+          timeout -s INT -k 60 340m python3 -u lightningminer_auto.py --interval 180 $ARGS
+          ec=$?
+          echo "exit=$ec"
+          if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
+          exit $ec

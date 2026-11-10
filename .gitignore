@@ -1,0 +1,19 @@
+# Jangan pernah commit ini
+*.log
+*.out
+__pycache__/
+*.pyc
+*.bak*
+*.bak-*
+
+# Config berisi sesi/key — diisi GitHub Secrets saat workflow jalan
+cryptofisher/cf_config.json
+lightningminer/lm_config.json
+cryptotowerdefense/ctd_cookie.txt
+cryptotowerdefense/ctd_secret.txt
+cryptotowerdefense/ctd_email.txt
+cryptotowerdefense/ctd_run.log
+
+# File lokal Termux
+.run_lock
+*.lock
