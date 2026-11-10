@@ -26,6 +26,7 @@ Tiga bot faucet jalan di **GitHub Actions** (bukan HP) — kuota HP hemat,
 | `CF_PASSWORD` | password akun CryptoFisher |
 | `CTD_EMAIL` | email akun CryptoTowerDefense |
 | `CTD_PASSWORD` | password akun CryptoTowerDefense |
+| `CTD_COOKIE` | cookie sesi CTD (`ctd_cookie.txt`) — dipakai dulu; kalau mati baru login Turnstile |
 | `LM_CONFIG_JSON` | isi lengkap `lm_config.json` (password LM + key solver xsolve/peak/nonecap), **tanpa** `local_ts_url`/`local_hc_url` |
 
 ## Jalankan manual

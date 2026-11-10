@@ -102,10 +102,13 @@ jobs:
         env:
           CTD_EMAIL: ${{ secrets.CTD_EMAIL }}
           CTD_PASSWORD: ${{ secrets.CTD_PASSWORD }}
+          CTD_COOKIE: ${{ secrets.CTD_COOKIE }}
           LM_CONFIG_JSON: ${{ secrets.LM_CONFIG_JSON }}
         run: |
           mkdir -p lightningminer cryptotowerdefense
           printf '%s' "$LM_CONFIG_JSON" > lightningminer/lm_config.json
+          # cookie sesi lama — kalau masih valid, TIDAK perlu login Turnstile
+          printf '%s' "$CTD_COOKIE" > cryptotowerdefense/ctd_cookie.txt
           python3 - <<'PY'
           import json
           p = "lightningminer/lm_config.json"
@@ -115,6 +118,8 @@ jobs:
           c.pop("local_hc_url", None)
           json.dump(c, open(p, "w"), indent=2)
           print("lm_config.json siap untuk CTD (xsolve/peak key)")
+          ck = open("cryptotowerdefense/ctd_cookie.txt").read().strip()
+          print("ctd_cookie.txt siap,", len(ck), "chars")
           PY
 
       - name: Jalankan CTD
@@ -147,7 +152,8 @@ jobs:
           python-version: '3.11'
 
       - name: Install deps
-        run: pip install -q requests
+        # Pillow = PIL (shortlink Xut baca gambar captcha)
+        run: pip install -q requests pillow
 
       - name: Tulis config dari Secrets
         env:
