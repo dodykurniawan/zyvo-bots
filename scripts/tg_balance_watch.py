@@ -24,7 +24,10 @@ def api(method: str, **params) -> dict:
     data = urllib.parse.urlencode(params).encode()
     req = urllib.request.Request(url, data=data)
     with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read().decode())
+        resp = json.loads(r.read().decode())
+    if not resp.get("ok"):
+        raise RuntimeError(f"TG {method} gagal: {resp.get('description')}")
+    return resp
 
 
 def send(text: str) -> None:
