@@ -64,6 +64,7 @@ jobs:
           PY
 
       - name: Jalankan CF level rush
+        id: bot
         env:
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
           CF_PASSWORD: ${{ secrets.CF_PASSWORD }}
@@ -79,6 +80,20 @@ jobs:
           # 124/130 = timeout/signal — bukan error bot
           if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
           exit $ec
+
+      - name: Notifikasi Telegram (CF)
+        if: always() && steps.bot.outcome != 'skipped'
+        env:
+          TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ] && { echo "TG belum diset"; exit 0; }
+          if [ "${{ steps.bot.outcome }}" = "success" ]; then ST="✅ SUKSES"; else ST="❌ GAGAL"; fi
+          TEXT="🤖 CF Level Rush — $ST
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TG_CHAT" \
+            --data-urlencode "text=$TEXT"
 
   ctd:
     if: inputs.only == 'all' || inputs.only == 'ctd' || github.event_name == 'schedule'
@@ -123,6 +138,7 @@ jobs:
           PY
 
       - name: Jalankan CTD
+        id: bot
         env:
           CTD_EMAIL: ${{ secrets.CTD_EMAIL }}
           CTD_PASSWORD: ${{ secrets.CTD_PASSWORD }}
@@ -139,6 +155,20 @@ jobs:
           pkill -f ctd_run_bot.mjs 2>/dev/null || true
           if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
           exit $ec
+
+      - name: Notifikasi Telegram (CTD)
+        if: always() && steps.bot.outcome != 'skipped'
+        env:
+          TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ] && { echo "TG belum diset"; exit 0; }
+          if [ "${{ steps.bot.outcome }}" = "success" ]; then ST="✅ SUKSES"; else ST="❌ GAGAL"; fi
+          TEXT="🛡️ CryptoTowerDefense — $ST
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TG_CHAT" \
+            --data-urlencode "text=$TEXT"
 
   lm:
     if: inputs.only == 'all' || inputs.only == 'lm' || github.event_name == 'schedule'
@@ -172,6 +202,7 @@ jobs:
           PY
 
       - name: Jalankan LightningMiner
+        id: bot
         working-directory: lightningminer
         run: |
           set +e
@@ -182,3 +213,61 @@ jobs:
           echo "exit=$ec"
           if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
           exit $ec
+
+      - name: Notifikasi Telegram (LM)
+        if: always() && steps.bot.outcome != 'skipped'
+        env:
+          TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ] && { echo "TG belum diset"; exit 0; }
+          if [ "${{ steps.bot.outcome }}" = "success" ]; then ST="✅ SUKSES"; else ST="❌ GAGAL"; fi
+          TEXT="⛏️ LightningMiner — $ST
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TG_CHAT" \
+            --data-urlencode "text=$TEXT"
+
+  # Ringkasan 1 pesan per run — jalan walau ada job gagal/skip
+  notify:
+    needs: [cf, ctd, lm]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Kirim ringkasan ke Telegram
+        env:
+          TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT_ID }}
+          R_CF: ${{ needs.cf.result }}
+          R_CTD: ${{ needs.ctd.result }}
+          R_LM: ${{ needs.lm.result }}
+        run: |
+          [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ] && { echo "TG belum diset"; exit 0; }
+          badge() {
+            case "$1" in
+              success)  echo "✅ sukses" ;;
+              failure)  echo "❌ gagal" ;;
+              cancelled) echo "⛔ dibatalkan" ;;
+              skipped)  echo "⏭️ dilewati" ;;
+              *)        echo "❓ $1" ;;
+            esac
+          }
+          ALL_OK=1
+          for r in "$R_CF" "$R_CTD" "$R_LM"; do
+            [ "$r" = "failure" ] || [ "$r" = "cancelled" ] && ALL_OK=0
+          done
+          if [ "$ALL_OK" = "1" ] && [ "$R_CF" != "skipped" -o "$R_CTD" != "skipped" -o "$R_LM" != "skipped" ]; then
+            HEAD="📊 Ringkasan zyvo-bots — AMAN"
+          else
+            HEAD="📊 Ringkasan zyvo-bots — ADA MASALAH"
+          fi
+          TEXT="$HEAD
+          🎣 CF: $(badge "$R_CF")
+          🛡️ CTD: $(badge "$R_CTD")
+          ⛏️ LM: $(badge "$R_LM")
+          🕐 $(date -u '+%Y-%m-%d %H:%M UTC')
+          🔗 ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TG_CHAT" \
+            --data-urlencode "text=$TEXT"
