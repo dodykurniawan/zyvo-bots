@@ -305,7 +305,9 @@ jobs:
             --data-urlencode "text=$TEXT"
 
   lime:
-    if: inputs.only == 'all' || inputs.only == 'lime' || github.event_name == 'schedule'
+    # limefaucet nolak IP datacenter GitHub (403 VPN/Proxy detected).
+    # Jadwal TIDAK jalan lime — hanya manual (butuh proxy/residential IP).
+    if: github.event_name == 'workflow_dispatch' && (inputs.only == 'all' || inputs.only == 'lime')
     runs-on: ubuntu-latest
     concurrency:
       group: bots-lime
