@@ -20,15 +20,17 @@ on:
           - ctd
           - lm
 
-# Satu job per bot — jangan dobelkan job yang sama masih jalan
-concurrency:
-  group: ${{ github.workflow }}-${{ github.job }}
-  cancel-in-progress: false
-
+# CONCURRENCY per-job (BUKAN workflow-level): di level workflow
+# `github.job` kosong → group "bots-" → SEMUA run antri penuh.
+# Tiap job punya group sendiri supaya cf/ctd/lm paralel lintas run,
+# tapi job sama tidak dobel.
 jobs:
   cf:
     if: inputs.only == 'all' || inputs.only == 'cf' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    concurrency:
+      group: bots-cf
+      cancel-in-progress: false
     # batas GitHub = 360 mnt; kita stop di 340 biar sempat cleanup
     timeout-minutes: 355
     steps:
@@ -121,6 +123,9 @@ jobs:
   ctd:
     if: inputs.only == 'all' || inputs.only == 'ctd' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    concurrency:
+      group: bots-ctd
+      cancel-in-progress: false
     timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
@@ -220,6 +225,9 @@ jobs:
   lm:
     if: inputs.only == 'all' || inputs.only == 'lm' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    concurrency:
+      group: bots-lm
+      cancel-in-progress: false
     timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
