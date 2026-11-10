@@ -13,6 +13,11 @@ cryptotowerdefense/ctd_cookie.txt
 cryptotowerdefense/ctd_secret.txt
 cryptotowerdefense/ctd_email.txt
 cryptotowerdefense/ctd_run.log
+limefaucet/config.env
+limefaucet/.lime_session.json
+limefaucet/.lime_session.json.*
+limefaucet/.captcha-lime.jpg
+limefaucet/.captcha-lime.jpg.meta.json
 
 # File lokal Termux
 .run_lock

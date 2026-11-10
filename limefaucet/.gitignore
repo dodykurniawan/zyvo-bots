@@ -1,0 +1,25 @@
+# Rahasia & data runtime — JANGAN pernah masuk git
+config.env
+config.env.*
+!.env.example
+!config.env.example
+
+# Sesi login & state (terikat akun/IP)
+.lime_session.json
+.lime_session.json.*
+*.state.json
+
+# Aset captcha yang diunduh otomatis
+.captcha-lime.jpg
+
+# Log & cache
+*.log
+__pycache__/
+*.pyc
+
+# Virtualenv
+venv/
+.venv/
+
+# Meta revalidasi captcha (etag/sha lokal — runtime)
+.captcha-lime.jpg.meta.json

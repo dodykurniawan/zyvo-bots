@@ -19,6 +19,7 @@ on:
           - cf
           - ctd
           - lm
+          - lime
 
 # CONCURRENCY per-job (BUKAN workflow-level): di level workflow
 # `github.job` kosong → group "bots-" → SEMUA run antri penuh.
@@ -303,9 +304,97 @@ jobs:
             --data-urlencode "chat_id=$TG_CHAT" \
             --data-urlencode "text=$TEXT"
 
+  lime:
+    if: inputs.only == 'all' || inputs.only == 'lime' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: bots-lime
+      cancel-in-progress: false
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        # Pillow+numpy = captcha rotasi lokal (gratis)
+        run: pip install -q requests pillow numpy
+
+      - name: Tulis config dari Secrets
+        env:
+          LIME_EMAIL: ${{ secrets.LIME_EMAIL }}
+          CAPTCHA_APIKEY: ${{ secrets.CAPTCHA_APIKEY }}
+        run: |
+          mkdir -p limefaucet
+          python3 - <<'PY'
+          import os
+          email = os.environ.get("LIME_EMAIL", "")
+          key = os.environ.get("CAPTCHA_APIKEY", "")
+          lines = [
+              f"LIME_EMAIL={email}",
+              f"CAPTCHA_APIKEY={key}",
+              "TOKEN_BUDGET=0",
+              "TOKEN_RESERVE=100",
+              "TOKEN_PRICE=0",
+              "YOUTUBE_MAX=10",
+          ]
+          open("limefaucet/config.env", "w").write("\n".join(lines) + "\n")
+          print("lime config siap; captcha_key:", "ADA" if key else "KOSONG (faucet+YT saja)")
+          PY
+
+      - name: Self-heal Lime (relogin kalau sesi mati)
+        env:
+          LIME_EMAIL: ${{ secrets.LIME_EMAIL }}
+        run: |
+          # sesi IP-terikat di Actions selalu baru → hapus cookie lama
+          rm -f limefaucet/.lime_session.json
+          echo "cookie dibuang (runner IP baru, login otomatis saat run)"
+
+      - name: Jalankan LimeFaucet
+        id: bot
+        env:
+          LIME_EMAIL: ${{ secrets.LIME_EMAIL }}
+          CAPTCHA_APIKEY: ${{ secrets.CAPTCHA_APIKEY }}
+        working-directory: limefaucet
+        run: |
+          set +e
+          ARGS=""
+          if [ "${{ inputs.test }}" = "true" ]; then ARGS="--once"; fi
+          run_bot() {
+            timeout -s INT -k 60 340m python3 -u limefaucet_auto.py \
+              --youtube-max 10 --youtube-interval 600 $ARGS
+          }
+          run_bot
+          ec=$?
+          echo "exit=$ec"
+          if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
+          echo "retry setelah buang sesi…"
+          rm -f .lime_session.json
+          run_bot
+          ec=$?
+          echo "exit_retry=$ec"
+          if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
+          exit $ec
+
+      - name: Notifikasi Telegram (Lime)
+        if: always() && steps.bot.outcome != 'skipped'
+        env:
+          TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ] && { echo "TG belum diset"; exit 0; }
+          if [ "${{ steps.bot.outcome }}" = "success" ]; then ST="✅ SUKSES"; else ST="❌ GAGAL"; fi
+          TEXT="🍋 LimeFaucet — $ST
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TG_CHAT" \
+            --data-urlencode "text=$TEXT"
+
   # Ringkasan 1 pesan per run — jalan walau ada job gagal/skip
   notify:
-    needs: [cf, ctd, lm]
+    needs: [cf, ctd, lm, lime]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -352,6 +441,7 @@ jobs:
           R_CF: ${{ needs.cf.result }}
           R_CTD: ${{ needs.ctd.result }}
           R_LM: ${{ needs.lm.result }}
+          R_LIME: ${{ needs.lime.result }}
         run: |
           [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ] && { echo "TG belum diset"; exit 0; }
           badge() {
@@ -364,10 +454,10 @@ jobs:
             esac
           }
           ALL_OK=1
-          for r in "$R_CF" "$R_CTD" "$R_LM"; do
+          for r in "$R_CF" "$R_CTD" "$R_LM" "$R_LIME"; do
             [ "$r" = "failure" ] || [ "$r" = "cancelled" ] && ALL_OK=0
           done
-          if [ "$ALL_OK" = "1" ] && [ "$R_CF" != "skipped" -o "$R_CTD" != "skipped" -o "$R_LM" != "skipped" ]; then
+          if [ "$ALL_OK" = "1" ] && [ "$R_CF" != "skipped" -o "$R_CTD" != "skipped" -o "$R_LM" != "skipped" -o "$R_LIME" != "skipped" ]; then
             HEAD="📊 Ringkasan zyvo-bots — AMAN"
           else
             HEAD="📊 Ringkasan zyvo-bots — ADA MASALAH"
@@ -377,6 +467,7 @@ jobs:
           🎣 CF: $(badge "$R_CF")
           🛡️ CTD: $(badge "$R_CTD")
           ⛏️ LM: $(badge "$R_LM")
+          🍋 Lime: $(badge "$R_LIME")
           $BAL
           🕐 $(date -u '+%Y-%m-%d %H:%M UTC')
           🔗 ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

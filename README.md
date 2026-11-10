@@ -1,6 +1,6 @@
 # zyvo-bots
 
-Tiga bot faucet jalan di **GitHub Actions** (bukan HP) — kuota HP hemat,
+Empat bot faucet jalan di **GitHub Actions** (bukan HP) — kuota HP hemat,
 24/7 selama repo public. Mode **premium**: fokus naik level/power + auto WD,
 plus **self-heal harian** (auto-relogin tanpa perintah).
 
@@ -9,6 +9,7 @@ plus **self-heal harian** (auto-relogin tanpa perintah).
 | `cf` | `cryptofisher/cryptofisher_premium.py` | Naik level (EXP catch) + auto-upgrade + auto WD multi-koin |
 | `ctd` | `cryptotowerdefense/ctd_auto.py` | Tower permanen LV + firstClear campaign + auto WD |
 | `lm` | `lightningminer/lightningminer_auto.py` | Shop miner (miningPower) + auto WD USDC |
+| `lime` | `limefaucet/limefaucet_auto.py` | Faucet rotasi (lokal GRATIS) + YouTube aviso (GRATIS) |
 
 ## Cara kerja
 
@@ -33,6 +34,8 @@ plus **self-heal harian** (auto-relogin tanpa perintah).
 | `CTD_PASSWORD` | password akun CryptoTowerDefense |
 | `CTD_COOKIE` | cookie sesi CTD — dipakai dulu; kalau mati baru login Turnstile |
 | `LM_CONFIG_JSON` | isi `lm_config.json` (password LM + key solver), **tanpa** `local_ts_url`/`local_hc_url` |
+| `LIME_EMAIL` | email FaucetPay terdaftar di limefaucet.com |
+| `CAPTCHA_APIKEY` | (opsional) key solver Turnstile — kosong = faucet+YouTube saja |
 | `TG_BOT_TOKEN` | token bot Telegram (@BotFather) |
 | `TG_CHAT_ID` | chat ID kamu |
 
@@ -40,7 +43,7 @@ plus **self-heal harian** (auto-relogin tanpa perintah).
 
 Actions → **bots** → **Run workflow**:
 - `test=true` → mode `--once` (tes singkat)
-- `only` → `all` / `cf` / `ctd` / `lm`
+- `only` → `all` / `cf` / `ctd` / `lm` / `lime`
 
 Actions → **selfheal** → Run workflow (cek + relogin sekarang).
 
