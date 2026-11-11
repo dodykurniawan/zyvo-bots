@@ -1,10 +1,9 @@
 name: balance
 
-# Cek saldo via Telegram: polling getUpdates tiap 5 menit,
-# balas /balance · /saldo · /start dengan saldo CF+CTD+LM.
+# SEJAK 2026-11-11: cron DIHAPUS — webhook Worker sudah instan
+# (/balance). getUpdates + webhook = Telegram 409 Conflict.
+# workflow_dispatch tetap ada untuk tes manual.
 on:
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 concurrency:

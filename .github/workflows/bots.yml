@@ -450,14 +450,16 @@ jobs:
             case "$1" in
               success)  echo "✅ sukses" ;;
               failure)  echo "❌ gagal" ;;
-              cancelled) echo "⛔ dibatalkan" ;;
+              # timeout-minutes 355 → GitHub tulis "cancelled" (bukan crash)
+              cancelled) echo "⏱️ habis batas 6 jam (normal)" ;;
               skipped)  echo "⏭️ dilewati" ;;
               *)        echo "❓ $1" ;;
             esac
           }
           ALL_OK=1
           for r in "$R_CF" "$R_CTD" "$R_LM" "$R_LIME"; do
-            [ "$r" = "failure" ] || [ "$r" = "cancelled" ] && ALL_OK=0
+            # cancelled = kena limit waktu GitHub, BUKAN bot error
+            [ "$r" = "failure" ] && ALL_OK=0
           done
           if [ "$ALL_OK" = "1" ] && [ "$R_CF" != "skipped" -o "$R_CTD" != "skipped" -o "$R_LM" != "skipped" -o "$R_LIME" != "skipped" ]; then
             HEAD="📊 Ringkasan zyvo-bots — AMAN"
