@@ -14,16 +14,19 @@ dobel). **Limefaucet selalu di HP**, tidak ada di Actions (IP ditolak).
 | `cf` | `cryptofisher/cryptofisher_premium.py` | Naik level (EXP catch) + auto-upgrade + auto WD multi-koin |
 | `ctd` | `cryptotowerdefense/ctd_auto.py` | Tower permanen LV + firstClear campaign + auto WD |
 | `lm` | `lightningminer/lightningminer_auto.py` | Shop miner (miningPower) + auto WD USDC |
-| *(HP only)* | `limefaucet_auto.py` + clipcoin + scrapper | Lime rotasi captcha + YouTube; scrapper 5 situs; clipcoin watch |
+| `clip` | `clipcoin/clipcoin_auto.py` | clipcoin.pro watch + image captcha CV + auto WD USDT BEP20 |
+| `scrp` | `scrapper/scrapper_auto.py` | 5 situs scrapper (BTC/PEPE/TRX/DOGE/LTC) passwordless |
+| *(HP only)* | `limefaucet_auto.py` | Lime rotasi captcha + YouTube (IP Actions ditolak) |
 
 ## Cara kerja
 
 - **Cron tiap 6 jam** (`17 */6 * * *`) → tiap job maks ~340 menit.
   (Batas GitHub = 360 menit/job; exit 124/130 = timeout, bukan gagal.)
 - **Failover**: `scripts/failover_watch.py` cek GH tiap 60–300 dtk.
-  GH OFF (workflow disabled / schedule basi > 8 jam) → start lokal;
-  GH ON → `SIGTERM`/`SIGKILL` pola CF/CTD/LM saja — lime/clipcoin/
-  scrapper tidak disentuh. API GH gagal → mode tidak diubah.
+  GH OFF (workflow disabled / schedule basi > 8 jam) → start lokal
+  CF/CTD/LM/clip/scrp; GH ON → kill pola itu (cegah dobel).
+  Lime SELALU di HP — tidak pernah disentuh failover.
+  API GH gagal → mode tidak diubah.
 - **Self-heal sebelum run**: `scripts/selfheal.py` cek sesi → relogin
   otomatis (CF dummy captcha, CTD xsolve, LM password). Gagal bot →
   self-heal lagi → **retry 1x**.
@@ -45,6 +48,8 @@ dobel). **Limefaucet selalu di HP**, tidak ada di Actions (IP ditolak).
 | `LM_CONFIG_JSON` | isi `lm_config.json` (password LM + key solver), **tanpa** `local_ts_url`/`local_hc_url` |
 | `TG_BOT_TOKEN` | token bot Telegram (@BotFather) |
 | `TG_CHAT_ID` | chat ID kamu |
+| `CLIPCOIN_PASSWORD` | password akun clipcoin.pro |
+| `SOLVERCF_KEY` | key solvercf (Turnstile login clipcoin) |
 
 (`LIME_EMAIL` / `CAPTCHA_APIKEY` legacy — lime sudah tidak ada di Actions.)
 
@@ -52,7 +57,7 @@ dobel). **Limefaucet selalu di HP**, tidak ada di Actions (IP ditolak).
 
 Actions → **bots** → **Run workflow**:
 - `test=true` → mode `--once` (tes singkat)
-- `only` → `all` / `cf` / `ctd` / `lm`
+- `only` → `all` / `cf` / `ctd` / `lm` / `clip` / `scrp`
 
 Actions → **selfheal** → Run workflow (cek + relogin sekarang).
 
