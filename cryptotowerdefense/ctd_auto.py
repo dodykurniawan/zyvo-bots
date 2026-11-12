@@ -411,7 +411,8 @@ class CTD:
                 until2 = int((r.get("status") or r).get("verifiedUntil") or 0) \
                     if isinstance(r.get("status") or r, dict) else 0
                 if until2 or r.get("status") == "active" or r.get("verifiedUntil"):
-                    log("jendela verifikasi diperpanjang (xsolve)")
+                    # via mana pun (xsolve/peak/solvercf) — window aktif = sukses
+                    log("jendela verifikasi diperpanjang")
                     self.maybe_start_run_bot()
                     return True
                 last = str(r)[:200]
