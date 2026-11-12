@@ -111,6 +111,7 @@ def solve_turnstile() -> str:
 
 
 _CA = None  # modul captcha_ai (rantai solver + AI vision) — dimuat sekali
+_CNK = None  # modul captcha_nokey (vision keyless tanpa API key)
 
 
 def _ca():
@@ -126,6 +127,21 @@ def _ca():
         spec.loader.exec_module(mod)
         _CA = mod
     return _CA
+
+
+def _cnk():
+    """Load captcha_nokey.py (vision keyless OVH + CV lokal)."""
+    global _CNK
+    if _CNK is None:
+        p = HERE / "captcha_nokey.py"
+        if not p.exists():
+            return None
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("captcha_nokey", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _CNK = mod
+    return _CNK
 
 
 def _solve_turnstile_solvercf_only() -> str:
@@ -338,19 +354,36 @@ def _coor_body(clicks) -> str:
 
 
 def ai_match_captcha(image_b64: str, queue_b64: str):
-    """Fallback AI (Gemini) saat CV lokal gagal → 3 klik genap atau None."""
-    ca = _ca()
-    if ca is None:
-        return None
+    """Fallback AI saat CV lokal gagal → 3 klik genap atau None.
+    Ladder: captcha_nokey (CV lokal + vision keyless, TANPA API key)
+            → Gemini (captcha_ai, kalau key ada)."""
     import base64
     scene_p = HERE / "_ai_scene.jpg"
     queue_p = HERE / "_ai_queue.png"
     try:
         scene_p.write_bytes(base64.b64decode(image_b64))
         queue_p.write_bytes(base64.b64decode(queue_b64))
-        clicks = ca.match_icons(scene_p, queue_p, quiet=True)
-        log(f"  AI match: {[(c['x'], c['y']) for c in clicks]}")
-        return [{"x": c["x"], "y": c["y"]} for c in clicks]
+        # 1) captcha_nokey — CV lokal dulu (nol jaringan), lalu vision
+        #    keyless OVH (nol API key). Terbukti akurat di selftest 13-11.
+        cnk = _cnk()
+        if cnk is not None:
+            try:
+                import argparse as _ap
+                out = cnk.mode_match(_ap.Namespace(scene=str(scene_p),
+                                                   queue=str(queue_p),
+                                                   json=True, quiet=True))
+                clicks = json.loads(out)
+                log(f"  AI match keyless: {[(c['x'], c['y']) for c in clicks]}")
+                return [{"x": c["x"], "y": c["y"]} for c in clicks]
+            except Exception as e:
+                log(f"  AI match keyless gagal → gemini: {e}")
+        # 2) Gemini (captcha_ai) — cadangan ber-key
+        ca = _ca()
+        if ca is not None:
+            clicks = ca.match_icons(scene_p, queue_p, quiet=True)
+            log(f"  AI match gemini: {[(c['x'], c['y']) for c in clicks]}")
+            return [{"x": c["x"], "y": c["y"]} for c in clicks]
+        return None
     except Exception as e:
         log(f"  AI match gagal: {e}")
         return None
