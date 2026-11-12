@@ -10,7 +10,7 @@ on:
 jobs:
   ezsolver-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       # python3.14 bawaan image gagal connect CDP (run 43217342722) → pin 3.12
       - uses: actions/setup-python@v5
@@ -66,11 +66,89 @@ jobs:
             https://clipcoin.pro/signin | head -12
           echo "--- lightningminer.com ---"
           curl -sI -m 15 -A "Mozilla/5.0" https://lightningminer.com/ | head -8
+          echo "--- api.js turnstile (asset kunci widget) ---"
+          curl -sI -m 15 "https://challenges.cloudflare.com/turnstile/v0/api.js" | head -8
           # sitekey LM asli dari homepage (regex sama dgn bot)
           SK=$(curl -s -m 20 -A "Mozilla/5.0 (Linux; Android 13) Chrome/120 Mobile Safari/537.36" https://lightningminer.com/ \
             | grep -oE '0x4AAAAAA[A-Za-z0-9_-]+' | head -1 || true)
           echo "LM sitekey scraped: ${SK:-NONE}"
           echo "lm_sitekey=$SK" >> "$GITHUB_OUTPUT"
+
+      # DIAGNOSA GROUND-TRUTH (run 3: iframe tak pernah ada, semua klik fallback).
+      # Jawab: api.js load? turnstile global ada? iframe masuk DOM? box ada?
+      - name: Browser probe — widget ground truth
+        run: |
+          python3 - <<'EOF'
+          import asyncio, json, nodriver as uc
+
+          INJECT = """
+          (() => {
+              window.stop();
+              document.body.innerHTML = '';
+              window._tsToken = null;
+              window._tsError = null;
+              const origAttach = Element.prototype.attachShadow;
+              Element.prototype.attachShadow = function(init) {
+                  const root = origAttach.call(this, { ...init, mode: 'open' });
+                  window._tsShadowRoot = root;
+                  return root;
+              };
+              const wrap = document.createElement('div');
+              wrap.id = '_ts_box';
+              wrap.style = 'position:fixed;top:20px;left:20px;z-index:2147483647;';
+              document.body.appendChild(wrap);
+              window._tsLoad = function () { window._tsLoaded = true;
+                  try { turnstile.render('#_ts_box', {
+                      sitekey: '0x4AAAAAAF2fs7K06aFo4dK_',
+                      callback: function(token) { window._tsToken = token; },
+                      'error-callback': function(code) { window._tsError = String(code); }
+                  }); window._tsRenderCalled = true; }
+                  catch (e) { window._tsRenderErr = String(e); }
+              };
+              const s = document.createElement('script');
+              s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=_tsLoad&render=explicit';
+              s.async = true;
+              s.onerror = function() { window._tsScriptErr = 'api.js onerror'; };
+              document.head.appendChild(s);
+          })();
+          """
+
+          async def main():
+              browser = await uc.start(
+                  browser_executable_path="/usr/bin/google-chrome",
+                  headless=False, user_data_dir="/tmp/ts_dbg",
+                  browser_args=["--disable-dev-shm-usage", "--mute-audio",
+                                "--disk-cache-size=33554432"])
+              page = await browser.get("https://clipcoin.pro/signin")
+              await asyncio.sleep(3)
+              print("PAGE:", await page.evaluate("""JSON.stringify({
+                  title: document.title, url: location.href,
+                  ready: document.readyState,
+                  iframes: document.querySelectorAll('iframe').length,
+                  bodyLen: document.body ? document.body.innerHTML.length : -1
+              })"""), flush=True)
+              await page.evaluate(INJECT)
+              await asyncio.sleep(14)
+              print("WIDGET:", await page.evaluate("""JSON.stringify({
+                  turnstile: typeof window.turnstile,
+                  apiLoaded: !!window._tsLoaded,
+                  renderCalled: !!window._tsRenderCalled,
+                  renderErr: window._tsRenderErr || null,
+                  scriptErr: window._tsScriptErr || null,
+                  token: window._tsToken || null,
+                  err: window._tsError,
+                  boxHTML: (document.getElementById('_ts_box')||{}).innerHTML ?
+                      document.getElementById('_ts_box').innerHTML.slice(0,400) : 'NO-BOX',
+                  iframesDoc: document.querySelectorAll('iframe').length,
+                  shadow: !!window._tsShadowRoot,
+                  shadowIframes: window._tsShadowRoot ?
+                      window._tsShadowRoot.querySelectorAll('iframe').length : -1
+              })"""), flush=True)
+              # screenshot utk bukti visual (artifact dump via stdout path saja)
+              await browser.stop()
+
+          asyncio.run(main())
+          EOF
 
       - name: Solve tests (LM + clipcoin REAL + CF demo)
         run: |
