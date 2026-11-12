@@ -77,6 +77,10 @@ jobs:
       # DIAGNOSA GROUND-TRUTH (run 3: iframe tak pernah ada, semua klik fallback).
       # Jawab: api.js load? turnstile global ada? iframe masuk DOM? box ada?
       - name: Browser probe — widget ground truth
+        env:
+          # Xvfb :99 di-start proses service; step ini harus pinjam display-nya
+          # (run 5: probe gagal "Failed to connect" karena DISPLAY kosong)
+          DISPLAY: ":99"
         run: |
           python3 - <<'EOF'
           import asyncio, json, nodriver as uc
