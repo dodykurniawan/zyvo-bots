@@ -40,21 +40,21 @@ jobs:
       - name: Start service (persistent Chrome)
         run: |
           cd /tmp/ezsolver
-          # -u: log service tak ke-buffer (run 2 log kosong → tak bisa diagnosa)
-          PYTHONUNBUFFERED=1 nohup python3 -u service.py > /tmp/ezsolver-service.log 2>&1 &
-          echo "service started pid $!"
-
-      - name: Wait for /health (max 120s — Chrome cold start)
-        run: |
-          for i in $(seq 1 60); do
-            if curl -sf http://127.0.0.1:8191/health; then
-              echo " — healthy at try $i"
-              exit 0
-            fi
-            sleep 2
+          # Chrome connect flaky di runner (run 1+4 gagal, 2+3 OK) → retry 3x
+          for try in 1 2 3; do
+            PYTHONUNBUFFERED=1 nohup python3 -u service.py > /tmp/ezsolver-service.log 2>&1 &
+            echo "service try $try pid $!"
+            for i in $(seq 1 20); do
+              curl -sf http://127.0.0.1:8191/health >/dev/null 2>&1 && { echo "healthy try $try/$i"; exit 0; }
+              # service mati (traceback connect gagal) → stop percobaan awal, restart
+              pgrep -f "python3 -u service.py" >/dev/null || break
+              sleep 2
+            done
+            pkill -f "python3 -u service.py" 2>/dev/null || true
+            sleep 3
           done
-          echo "SERVICE NOT HEALTHY"
-          tail -50 /tmp/ezsolver-service.log
+          echo "SERVICE NOT HEALTHY after 3 tries"
+          tail -30 /tmp/ezsolver-service.log
           exit 1
 
       - name: Probe IP + scrape LM sitekey
