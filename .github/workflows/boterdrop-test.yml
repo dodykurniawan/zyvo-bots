@@ -1,0 +1,138 @@
+# Trial Boterdrop-Solver (najibyahya) 2026-11-12 — FastAPI + Camoufox.
+# Endpoint: GET /turnstile?url=&sitekey= → task_id → GET /result?id= → value=token.
+# Beda dgn EzSolver (nodriver Chrome): Camoufox = Firefox anti-detect.
+# Verdict: PASS = token clipcoin sitekey asli keluar. Dispatch-only.
+name: boterdrop-test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  boterdrop-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps (xvfb + camoufox + playwright)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libasound2t64 \
+            || sudo apt-get install -y -qq xvfb libasound2
+          python -m pip install --quiet "fastapi==0.95.2" uvicorn \
+            "camoufox[fetch]" loguru psutil playwright
+
+      - name: Fetch camoufox browser + playwright deps
+        run: |
+          python -m camoufox fetch
+          sudo python -m playwright install-deps
+          playwright install firefox || true
+
+      - name: Clone Boterdrop
+        run: git clone --depth 1 https://github.com/najibyahya/Boterdrop-Solver.git /tmp/boterdrop
+
+      - name: Config + start server
+        run: |
+          cd /tmp/boterdrop
+          cat > config.json <<'JSON'
+          {
+            "headless": true,
+            "thread": 1,
+            "page_count": 1,
+            "proxy_support": false,
+            "proxy_file": "proxies.txt",
+            "host": "127.0.0.1",
+            "port": 8000,
+            "debug": false,
+            "cleanup_interval_minutes": 10
+          }
+          JSON
+          PYTHONUNBUFFERED=1 nohup python -u api_server.py > /tmp/boterdrop.log 2>&1 &
+          echo "server started pid $!"
+
+      - name: Wait server up (max 180s — camoufox cold start)
+        run: |
+          for i in $(seq 1 60); do
+            # /docs hidup = uvicorn accept; pool browser bisa masih 429 → handle di solve
+            if curl -sf -o /dev/null http://127.0.0.1:8000/docs; then
+              echo " — docs up at try $i"
+              exit 0
+            fi
+            pgrep -f "api_server.py" >/dev/null || break
+            sleep 3
+          done
+          echo "SERVER NOT UP"
+          tail -50 /tmp/boterdrop.log
+          exit 1
+
+      - name: Solve clipcoin REAL sitekey
+        id: solve
+        run: |
+          python - <<'EOF'
+          import json, os, time, urllib.request, urllib.error
+
+          BASE = "http://127.0.0.1:8000"
+          SITEKEY = "0x4AAAAAAF2fs7K06aFo4dK_"
+          URL = "https://clipcoin.pro/signin"
+
+          def get(path, timeout=60):
+              try:
+                  with urllib.request.urlopen(BASE + path, timeout=timeout) as r:
+                      return json.loads(r.read()), r.status
+              except urllib.error.HTTPError as e:
+                  try:
+                      return json.loads(e.read()), e.code
+                  except Exception:
+                      return {}, e.code
+
+          # create (retry kalau 429 — page pool belum siap)
+          d, code = {}, 0
+          for attempt in range(8):
+              d, code = get(f"/turnstile?url={URL}&sitekey={SITEKEY}")
+              print(f"create try{attempt}: {code} {d}", flush=True)
+              if code == 202 and d.get("task_id"):
+                  break
+              time.sleep(10)
+          tid = d.get("task_id")
+          ok = False
+          if tid:
+              t0 = time.time()
+              while time.time() - t0 < 240:
+                  time.sleep(3)
+                  r, c = get(f"/result?id={tid}")
+                  st = r.get("status")
+                  print(f"poll {c}: status={st} "
+                        f"elapsed={r.get('elapsed_time')} "
+                        f"msg={r.get('message') or r.get('error')}", flush=True)
+                  if c == 200 and st == "success":
+                      tok = str(r.get("value") or "")
+                      ok = len(tok) > 20
+                      print(f"TOKEN len={len(tok)} {tok[:60]}...", flush=True)
+                      break
+                  if c in (404, 408, 422, 500) or st == "error":
+                      print(f"FAILED: {r}", flush=True)
+                      break
+          out = os.environ.get("GITHUB_OUTPUT")
+          if out:
+              with open(out, "a") as fh:
+                  fh.write("got_token=%s\n" % ("true" if ok else "false"))
+          print("VERDICT:", "PASS" if ok else "FAIL", flush=True)
+          raise SystemExit(0 if ok else 1)
+          EOF
+
+      - name: Dump server log
+        if: always()
+        run: tail -80 /tmp/boterdrop.log
+
+      - name: Verdict
+        run: |
+          S="${{ steps.solve.outputs.got_token }}"
+          echo "solve=$S"
+          if [ "$S" = "true" ]; then
+            echo "VERDICT: PASS — Boterdrop solve sitekey asli dari Actions"
+            exit 0
+          fi
+          echo "VERDICT: FAIL — token tak keluar"
+          exit 1
