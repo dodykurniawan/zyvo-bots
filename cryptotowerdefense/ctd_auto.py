@@ -115,7 +115,7 @@ class Xsolve:
         self.key = key
 
     def solve(self, sitekey, url, action=None, cdata=None) -> str:
-        # xsolve kadang balas token langsung, kadang 600010 — retry 1x dulu
+        # rantai: xsolve (retry 1x) → peak → solvercf (masih ada saldo 2026-11-12)
         try:
             return self._xsolve(sitekey, url, action, cdata)
         except Exception as e:
@@ -125,7 +125,51 @@ class Xsolve:
                 return self._xsolve(sitekey, url, action, cdata)
             except Exception as e2:
                 log(f"xsolve retry gagal ({e2}) → fallback peak")
-                return self._peak(sitekey, url, action, cdata)
+                try:
+                    return self._peak(sitekey, url, action, cdata)
+                except Exception as e3:
+                    log(f"peak gagal ({e3}) → fallback solvercf")
+                    return self._solvercf(sitekey, url, action, cdata)
+
+    def _solvercf(self, sitekey, url, action=None, cdata=None) -> str:
+        """solvercf fallback (2026-11-12): xsolve+peak keduanya insufficient balance.
+
+        WAJIB: pageAction+data (bukan action — docs solvercf) + userAgent identik
+        dengan sesi submit, else CTD balas HUMAN_ACTION_MISMATCH. Terbukti verify 200.
+        """
+        try:
+            key = json.load(open(CONFIG["xsolve_key_file"])).get("solvercf_key", "")
+        except Exception:
+            key = ""
+        if not key:
+            raise RuntimeError("solvercf key tidak ditemukan di lm_config.json")
+        task = {"type": "TurnstileTask", "websiteUrl": url, "websiteKey": sitekey,
+                "userAgent": UA}
+        if action:
+            task["pageAction"] = action
+        if cdata:
+            task["data"] = cdata
+        r = requests.post("https://solvercf.com/token/extension/createTask",
+                          json={"clientKey": key, "task": task}, timeout=30).json()
+        tid = r.get("taskId")
+        if not tid:
+            raise RuntimeError(f"solvercf createTask: {str(r)[:160]}")
+        t0 = time.time()
+        while time.time() - t0 < 90:
+            time.sleep(3)
+            p = requests.post("https://solvercf.com/token/extension/getTaskResult",
+                              json={"clientKey": key, "taskId": tid}, timeout=30).json()
+            if p.get("status") == "ready":
+                sol = p.get("solution") or {}
+                tok = sol.get("token") or ""
+                if tok:
+                    # docs solvercf: submit token + userAgent yang SAMA dengan solve
+                    self._solver_ua = sol.get("userAgent") or UA
+                    return tok
+                raise RuntimeError(f"solvercf ready tanpa token: {str(p)[:160]}")
+            if p.get("errorId") not in (0, None, "0"):
+                raise RuntimeError(f"solvercf error: {str(p)[:160]}")
+        raise RuntimeError("solvercf: timeout polling")
 
     def _peak(self, sitekey, url, action=None, cdata=None) -> str:
         """Peak fallback (2026-11-09): xsolve rusak global, peak sehat."""
