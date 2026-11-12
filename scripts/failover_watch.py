@@ -75,13 +75,9 @@ BOTS: dict[str, dict] = {
 
 
 def log(msg: str) -> None:
-    line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {msg}"
-    print(line, flush=True)
-    try:
-        with LOG_PATH.open("a") as f:
-            f.write(line + "\n")
-    except OSError:
-        pass
+    # stdout sudah di-redirect ke failover.log oleh start_failover.sh —
+    # jangan tulis ke file lagi (double baris).
+    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {msg}", flush=True)
 
 
 def notify(title: str, content: str) -> None:
