@@ -1,0 +1,13 @@
+{
+  "fp_email": "dodykurniaw4n@gmail.com",
+  "sites": {
+    "btc": "https://satoshiscrapper.com",
+    "pepe": "https://pepescrapper.com",
+    "tron": "https://tronscrapper.com",
+    "doge": "https://dogescrapper.com",
+    "ltc": "https://ltcscrapper.com"
+  },
+  "interval_sec": 180,
+  "min_keep_balance": "full",
+  "notes": "passwordless = FaucetPay email; WD auto saat claimReady + balance>=minClaim"
+}

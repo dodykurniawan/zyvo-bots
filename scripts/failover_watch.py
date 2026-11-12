@@ -44,6 +44,8 @@ KILL_PATTERNS = [
     r"run_cf\.sh",
     r"ctd_auto\.py",
     r"lightningminer_auto\.py",
+    r"clipcoin_auto\.py",
+    r"scrapper_auto\.py",
 ]
 
 BOTS: dict[str, dict] = {
@@ -70,6 +72,22 @@ BOTS: dict[str, dict] = {
         "cmd": ["python3", "-u", "lightningminer_auto.py", "--interval", "180"],
         "env_files": {},
         "log": "lm_auto_local.log",
+    },
+    "clip": {
+        "label": "CLIP",
+        "probe": r"clipcoin_auto\.py",
+        "cwd": SITES / "clipcoin",
+        "cmd": ["python3", "-u", "clipcoin_auto.py", "--interval", "180"],
+        "env_files": {"CLIPCOIN_PASSWORD": "clipcoin_secret.txt"},
+        "log": "bot.log",
+    },
+    "scrp": {
+        "label": "SCRP",
+        "probe": r"scrapper_auto\.py",
+        "cwd": SITES / "scrapper_suite",
+        "cmd": ["python3", "-u", "scrapper_auto.py", "--site", "all", "--interval", "180"],
+        "env_files": {},
+        "log": "suite.log",
     },
 }
 

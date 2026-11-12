@@ -25,3 +25,11 @@ limefaucet/.captcha-lime.jpg.meta.json
 worker/.webhook_secret
 worker/.cf_token
 worker/.account_id
+
+# clipcoin / scrapper — sesi & log lokal
+clipcoin/state.json
+clipcoin/config.json
+clipcoin/bot.log
+clipcoin/clipcoin_secret.txt
+scrapper/state_*.json
+scrapper/suite.log

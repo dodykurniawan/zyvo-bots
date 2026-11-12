@@ -19,6 +19,8 @@ on:
           - cf
           - ctd
           - lm
+          - clip
+          - scrp
           # lime TIDAK ada di Actions (2026-11-12) — selalu jalan di HP
 
 # CONCURRENCY per-job (BUKAN workflow-level): di level workflow
@@ -304,10 +306,148 @@ jobs:
             --data-urlencode "chat_id=$TG_CHAT" \
             --data-urlencode "text=$TEXT"
 
+  # ---- clipcoin.pro (2026-11-12) — image captcha CV lokal, WD USDT BEP20 ----
+  clip:
+    if: inputs.only == 'all' || inputs.only == 'clip' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: bots-clip
+      cancel-in-progress: false
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        # numpy+PIL = matcher gambar captcha (3 ikon)
+        run: pip install -q requests numpy pillow
+
+      - name: Tulis config dari Secrets
+        env:
+          CLIPCOIN_EMAIL: ${{ secrets.CF_EMAIL }}
+          CLIPCOIN_PASSWORD: ${{ secrets.CLIPCOIN_PASSWORD }}
+          SOLVERCF_KEY: ${{ secrets.SOLVERCF_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          cfg = {
+              "email": os.environ.get("CLIPCOIN_EMAIL", ""),
+              "password": "",  # dari env CLIPCOIN_PASSWORD — jangan tulis ke file
+              "wallet_bep20": "0xfd8e65eae62f33652400a2f7a5ee3a6e87457f7a",
+              "service": "usdt_bep20",
+              "min_wd": 0.3,
+          }
+          os.makedirs("clipcoin", exist_ok=True)
+          with open("clipcoin/config.json", "w") as f:
+              json.dump(cfg, f, indent=2)
+          assert os.environ.get("CLIPCOIN_PASSWORD"), "CLIPCOIN_PASSWORD kosong"
+          assert os.environ.get("SOLVERCF_KEY"), "SOLVERCF_KEY kosong"
+          print("clipcoin config siap (password TIDAK ditulis)")
+          PY
+
+      - name: Jalankan clipcoin
+        id: bot
+        env:
+          CLIPCOIN_EMAIL: ${{ secrets.CF_EMAIL }}
+          CLIPCOIN_PASSWORD: ${{ secrets.CLIPCOIN_PASSWORD }}
+          SOLVERCF_KEY: ${{ secrets.SOLVERCF_KEY }}
+        working-directory: clipcoin
+        run: |
+          set +e
+          ARGS=""
+          if [ "${{ inputs.test }}" = "true" ]; then ARGS="--once"; fi
+          run_bot() {
+            timeout -s INT -k 60 340m python3 -u clipcoin_auto.py --interval 180 $ARGS
+          }
+          run_bot
+          ec=$?
+          echo "exit=$ec"
+          if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
+          echo "retry 1x…"
+          run_bot
+          ec=$?
+          echo "exit_retry=$ec"
+          if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
+          exit $ec
+
+      - name: Notifikasi Telegram (clipcoin)
+        if: always() && steps.bot.outcome != 'skipped'
+        env:
+          TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ] && { echo "TG belum diset"; exit 0; }
+          if [ "${{ steps.bot.outcome }}" = "success" ]; then ST="✅ SUKSES"; else ST="❌ GAGAL"; fi
+          BAL=$(tail -5 clipcoin/bot.log 2>/dev/null | grep -E "balance|STATUS" | tail -1 || true)
+          TEXT="🪙 clipcoin — $ST
+          $BAL
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TG_CHAT" \
+            --data-urlencode "text=$TEXT"
+
+  # ---- scrapper suite 5 domain (2026-11-12) — passwordless FP ----
+  scrp:
+    if: inputs.only == 'all' || inputs.only == 'scrp' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: bots-scrp
+      cancel-in-progress: false
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -q requests
+
+      - name: Jalankan scrapper suite
+        id: bot
+        working-directory: scrapper
+        run: |
+          set +e
+          ARGS=""
+          if [ "${{ inputs.test }}" = "true" ]; then ARGS="--once"; fi
+          run_bot() {
+            timeout -s INT -k 60 340m python3 -u scrapper_auto.py --site all --interval 180 $ARGS
+          }
+          run_bot
+          ec=$?
+          echo "exit=$ec"
+          if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
+          echo "retry 1x…"
+          run_bot
+          ec=$?
+          echo "exit_retry=$ec"
+          if [ "$ec" -eq 0 ] || [ "$ec" -eq 124 ] || [ "$ec" -eq 130 ]; then exit 0; fi
+          exit $ec
+
+      - name: Notifikasi Telegram (scrapper)
+        if: always() && steps.bot.outcome != 'skipped'
+        env:
+          TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ] && { echo "TG belum diset"; exit 0; }
+          if [ "${{ steps.bot.outcome }}" = "success" ]; then ST="✅ SUKSES"; else ST="❌ GAGAL"; fi
+          BAL=$(ls scrapper/state_*.json 2>/dev/null | wc -l)
+          TEXT="🦎 scrapper suite — $ST
+          state files: $BAL
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TG_CHAT" \
+            --data-urlencode "text=$TEXT"
+
   # Ringkasan 1 pesan per run — jalan walau ada job gagal/skip
   # lime DIHAPUS dari Actions (2026-11-12): selalu jalan di HP, IP GH ditolak
   notify:
-    needs: [cf, ctd, lm]
+    needs: [cf, ctd, lm, clip, scrp]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -354,6 +494,8 @@ jobs:
           R_CF: ${{ needs.cf.result }}
           R_CTD: ${{ needs.ctd.result }}
           R_LM: ${{ needs.lm.result }}
+          R_CLIP: ${{ needs.clip.result }}
+          R_SCRP: ${{ needs.scrp.result }}
         run: |
           [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ] && { echo "TG belum diset"; exit 0; }
           badge() {
@@ -367,11 +509,11 @@ jobs:
             esac
           }
           ALL_OK=1
-          for r in "$R_CF" "$R_CTD" "$R_LM"; do
+          for r in "$R_CF" "$R_CTD" "$R_LM" "$R_CLIP" "$R_SCRP"; do
             # cancelled = kena limit waktu GitHub, BUKAN bot error
             [ "$r" = "failure" ] && ALL_OK=0
           done
-          if [ "$ALL_OK" = "1" ] && [ "$R_CF" != "skipped" -o "$R_CTD" != "skipped" -o "$R_LM" != "skipped" ]; then
+          if [ "$ALL_OK" = "1" ]; then
             HEAD="📊 Ringkasan zyvo-bots — AMAN"
           else
             HEAD="📊 Ringkasan zyvo-bots — ADA MASALAH"
@@ -381,6 +523,8 @@ jobs:
           🎣 CF: $(badge "$R_CF")
           🛡️ CTD: $(badge "$R_CTD")
           ⛏️ LM: $(badge "$R_LM")
+          🪙 clip: $(badge "$R_CLIP")
+          🦎 scrp: $(badge "$R_SCRP")
           🍋 Lime: selalu di HP (bukan Actions)
           $BAL
           🕐 $(date -u '+%Y-%m-%d %H:%M UTC')
