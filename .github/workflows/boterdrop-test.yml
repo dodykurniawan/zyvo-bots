@@ -27,8 +27,9 @@ jobs:
       - name: Fetch camoufox browser + playwright deps
         run: |
           python -m camoufox fetch
-          sudo python -m playwright install-deps
-          playwright install firefox || true
+          # sudo = PATH beda → tunjuk python Actions explicit (run 1: /usr/bin/python no playwright)
+          PY="$(command -v python)"
+          sudo "$PY" -m playwright install-deps
 
       - name: Clone Boterdrop
         run: git clone --depth 1 https://github.com/najibyahya/Boterdrop-Solver.git /tmp/boterdrop
@@ -124,7 +125,7 @@ jobs:
 
       - name: Dump server log
         if: always()
-        run: tail -80 /tmp/boterdrop.log
+        run: tail -80 /tmp/boterdrop.log 2>/dev/null || echo "(no server log — belum start)"
 
       - name: Verdict
         run: |
