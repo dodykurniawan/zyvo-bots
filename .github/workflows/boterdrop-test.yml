@@ -50,7 +50,8 @@ jobs:
             "cleanup_interval_minutes": 10
           }
           JSON
-          PYTHONUNBUFFERED=1 nohup python -u api_server.py > /tmp/boterdrop.log 2>&1 &
+          # yes "" = jawab Enter utk prompt konfirmasi config (run 2: EOFError)
+          yes "" | PYTHONUNBUFFERED=1 python -u api_server.py > /tmp/boterdrop.log 2>&1 &
           echo "server started pid $!"
 
       - name: Wait server up (max 180s — camoufox cold start)
