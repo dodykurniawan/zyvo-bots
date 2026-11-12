@@ -1,0 +1,90 @@
+# Trial EzSolver (2026-11-12) — solver Turnstile lokal GRATIS (Chrome+nodriver).
+# Keputusan user: coba EzSolver dulu; kalau GAGAL → revert xsolve seperti awal.
+# Verdict: PASS = token clipcoin sitekey asli keluar (bukan hanya demo).
+# Dispatch-only, bukan cron — jangan dijadwalkan.
+name: ezsolver-test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ezsolver-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Install deps (xvfb + nodriver + chrome check)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb
+          python3 -m pip install --quiet nodriver
+          echo "CHROME_PATH=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser || true)" >> "$GITHUB_ENV"
+          echo "chrome at: $(command -v google-chrome || echo NOT-FOUND)"
+
+      - name: Clone EzSolver
+        run: git clone --depth 1 https://github.com/ismoiloffS/EzSolver.git /tmp/ezsolver
+
+      - name: Start service (persistent Chrome)
+        run: |
+          cd /tmp/ezsolver
+          nohup python3 service.py > /tmp/ezsolver-service.log 2>&1 &
+          echo "service started pid $!"
+
+      - name: Wait for /health (max 120s — Chrome cold start)
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8191/health; then
+              echo " — healthy at try $i"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "SERVICE NOT HEALTHY"
+          tail -50 /tmp/ezsolver-service.log
+          exit 1
+
+      - name: Solve tests (clipcoin REAL + CF demo)
+        run: |
+          python3 - <<'EOF'
+          import json, time, urllib.request, urllib.error
+
+          def solve(sitekey, siteurl, timeout=60):
+              payload = json.dumps({"sitekey": sitekey, "siteurl": siteurl,
+                                    "timeout": timeout}).encode()
+              req = urllib.request.Request(
+                  "http://127.0.0.1:8191/solve", data=payload,
+                  headers={"Content-Type": "application/json"}, method="POST")
+              t0 = time.time()
+              try:
+                  with urllib.request.urlopen(req, timeout=timeout + 30) as r:
+                      d = json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  d = json.loads(e.read())
+              return d, time.time() - t0
+
+          tests = [
+              # target ASLI — kalau ini PASS, EzSolver layak masuk rantai bot
+              ("clipcoin", "0x4AAAAAAF2fs7K06aFo4dK_", "https://clipcoin.pro/signin"),
+              # demo sitekey CF — info saja, bisa domain-locked
+              ("cf-demo", "3x00000000000000000000FF", "https://www.cloudflare.com"),
+          ]
+          clip_pass = False
+          for name, sk, su in tests:
+              try:
+                  d, dt = solve(sk, su)
+                  tok = str(d.get("token") or "")
+                  ok = len(tok) > 20
+                  if name == "clipcoin":
+                      clip_pass = ok
+                  print(f"[{name}] {'PASS' if ok else 'FAIL'} "
+                        f"len={len(tok)} {dt:.1f}s "
+                        f"{tok[:50] + '...' if ok else d}")
+              except Exception as e:
+                  print(f"[{name}] ERROR {e}")
+          print("VERDICT:", "PASS — EzSolver solve sitekey asli"
+                if clip_pass else "FAIL — EzSolver tidak keluar token asli")
+          raise SystemExit(0 if clip_pass else 1)
+          EOF
+
+      - name: Dump service log
+        if: always()
+        run: tail -80 /tmp/ezsolver-service.log
