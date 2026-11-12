@@ -12,13 +12,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
+      # python3.14 bawaan image gagal connect CDP (run 43217342722) → pin 3.12
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install deps (xvfb + nodriver + chrome check)
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb
-          python3 -m pip install --quiet nodriver
+          python -m pip install --quiet nodriver
           echo "CHROME_PATH=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser || true)" >> "$GITHUB_ENV"
           echo "chrome at: $(command -v google-chrome || echo NOT-FOUND)"
+          python --version
+          google-chrome --version
+
+      - name: Debug — chrome standalone launch
+        run: |
+          # buktiin chrome sendiri bisa jalan di runner ini (bukan salah EzSolver)
+          timeout 25 google-chrome --headless=new --no-sandbox --disable-gpu \
+            --user-data-dir=/tmp/chrome-dbg --dump-dom about:blank \
+            && echo "CHROME-STANDALONE-OK" || echo "CHROME-STANDALONE-FAIL rc=$?"
 
       - name: Clone EzSolver
         run: git clone --depth 1 https://github.com/ismoiloffS/EzSolver.git /tmp/ezsolver
