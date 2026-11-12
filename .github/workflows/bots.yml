@@ -354,6 +354,8 @@ jobs:
           CLIPCOIN_EMAIL: ${{ secrets.CF_EMAIL }}
           CLIPCOIN_PASSWORD: ${{ secrets.CLIPCOIN_PASSWORD }}
           SOLVERCF_KEY: ${{ secrets.SOLVERCF_KEY }}
+          # fallback AI image captcha (captcha_ai.py → Gemini); kosong = AI off, CV tetap jalan
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
         working-directory: clipcoin
         run: |
           set +e

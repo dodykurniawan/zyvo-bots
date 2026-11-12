@@ -83,26 +83,63 @@ def load_password() -> str:
 
 
 def solve_turnstile() -> str:
-    """Turnstile lewat solvercf. Key: env SOLVERCF_KEY → lm_config lokal → path Termux."""
-    import os
-    key = os.environ.get("SOLVERCF_KEY", "").strip()
-    if not key:
-        for cand in (
-            pathlib.Path(__file__).resolve().parent.parent / "lightningminer" / "lm_config.json",
-            pathlib.Path("/storage/emulated/0/Download/ZYVO/sites/lightningminer/lm_config.json"),
-        ):
-            try:
-                key = json.loads(cand.read_text()).get("solvercf_key") or ""
-            except Exception:
-                key = ""
-            if key:
-                break
+    """Turnstile: rantai xsolve → peak → solvercf via captcha_ai.py.
+
+    Key: env SOLVERCF_KEY/XSOLVE_KEY/PEAK_KEY dulu → lm_config.json.
+    captcha_ai.py hilang → jalur lama (solvercf saja) tetap jalan.
+    """
+    ca = _ca()
+    if ca is None:
+        return _solve_turnstile_solvercf_only()
+    cfg = ca.load_cfg()
+    errs, have_key = [], False
+    for key_name, name, fn in ca.TURNSTILE_CHAIN:
+        key = cfg.get(key_name) or ""
+        if not key:
+            errs.append(f"{name}: key kosong")
+            continue
+        have_key = True
+        log(f"turnstile: coba {name}…")
+        try:
+            return fn(key, SITEKEY, PAGEURL, None, None, UA)["token"]
+        except Exception as e:
+            errs.append(f"{name}: {e}")
+            log(f"turnstile {name} gagal: {e}")
+    if not have_key:  # tak ada key sama sekali → jalur lama
+        return _solve_turnstile_solvercf_only()
+    raise RuntimeError("turnstile semua solver gagal: " + " | ".join(errs))
+
+
+_CA = None  # modul captcha_ai (rantai solver + AI vision) — dimuat sekali
+
+
+def _ca():
+    """Load captcha_ai.py dari folder yang sama (ikut checkout/pull)."""
+    global _CA
+    if _CA is None:
+        p = HERE / "captcha_ai.py"
+        if not p.exists():
+            return None
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("captcha_ai", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _CA = mod
+    return _CA
+
+
+def _solve_turnstile_solvercf_only() -> str:
+    """Jalur LAMA (solvercf saja) — fallback kalau captcha_ai.py tidak ada."""
+    lm = pathlib.Path("/storage/emulated/0/Download/ZYVO/sites/lightningminer/lm_config.json")
+    key = json.loads(lm.read_text()).get("solvercf_key") if lm.exists() else ""
+    key = key or __import__("os").environ.get("SOLVERCF_KEY", "").strip()
     if not key:
         raise RuntimeError("solvercf_key tidak ada (env SOLVERCF_KEY / lm_config.json)")
     base = "https://solvercf.com/token/extension"
     r = requests.post(f"{base}/createTask", json={
         "clientKey": key,
-        "task": {"type": "TurnstileTask", "websiteUrl": PAGEURL, "websiteKey": SITEKEY},
+        "task": {"type": "TurnstileTask", "websiteUrl": PAGEURL,
+                 "websiteKey": SITEKEY, "userAgent": UA},
     }, timeout=30).json()
     tid = r.get("taskId")
     if not tid:
@@ -116,6 +153,8 @@ def solve_turnstile() -> str:
             if tok:
                 return tok
             raise RuntimeError(f"solvercf ready tanpa token: {p}")
+        if p.get("status") == "failed":
+            raise RuntimeError(f"solvercf failed: {p.get('errorDescription')}")
         if p.get("errorId") not in (0, None, "0"):
             raise RuntimeError(f"solvercf error: {p}")
     raise RuntimeError("solvercf timeout")
@@ -298,6 +337,31 @@ def _coor_body(clicks) -> str:
     return "&".join(parts)
 
 
+def ai_match_captcha(image_b64: str, queue_b64: str):
+    """Fallback AI (Gemini) saat CV lokal gagal → 3 klik genap atau None."""
+    ca = _ca()
+    if ca is None:
+        return None
+    import base64
+    scene_p = HERE / "_ai_scene.jpg"
+    queue_p = HERE / "_ai_queue.png"
+    try:
+        scene_p.write_bytes(base64.b64decode(image_b64))
+        queue_p.write_bytes(base64.b64decode(queue_b64))
+        clicks = ca.match_icons(scene_p, queue_p, quiet=True)
+        log(f"  AI match: {[(c['x'], c['y']) for c in clicks]}")
+        return [{"x": c["x"], "y": c["y"]} for c in clicks]
+    except Exception as e:
+        log(f"  AI match gagal: {e}")
+        return None
+    finally:
+        for p in (scene_p, queue_p):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+
 class Clip:
     def __init__(self, state: dict):
         self.ck: dict = dict(state.get("cookie") or {})
@@ -453,7 +517,12 @@ class Clip:
         return {"ok": False, "why": "captcha", "raw": ck}
 
     def _captcha_round(self, ck: dict, max_try: int = 3) -> Optional[dict]:
-        """check {} → image? solve 3 klik → coor → sampai reward / gagal."""
+        """check {} → image? solve 3 klik → coor → sampai reward / gagal.
+
+        Urutan solver: CV lokal dulu (gratis) → AI Gemini sebagai fallback;
+        server tolak jawaban → putaran berikut AI duluan.
+        """
+        prefer_ai = False
         for attempt in range(max_try):
             data = ck.get("data") or {}
             if "reward" in data:
@@ -463,8 +532,15 @@ class Clip:
             if not img or not queue:
                 # bentuk tak dikenal
                 return ck
-            log(f"  image captcha (percobaan {attempt + 1}/{max_try})…")
-            clicks = solve_image_captcha(img, queue)
+            log(f"  image captcha (percobaan {attempt + 1}/{max_try})"
+                f"{' [AI duluan]' if prefer_ai else ''}…")
+            clicks = None
+            if prefer_ai:
+                clicks = ai_match_captcha(img, queue) \
+                    or solve_image_captcha(img, queue)
+            else:
+                clicks = solve_image_captcha(img, queue) \
+                    or ai_match_captcha(img, queue)
             if not clicks:
                 # refreshTask=1 → gambar baru
                 ck = self.post("/user/captcha/check/", {"refreshTask": 1})
@@ -477,7 +553,8 @@ class Clip:
             if msg in ("limitIsOver", "cannotPassTestTask", "taskBySkip", "verifTimeExpired"):
                 log(f"  captcha reject: {msg}")
                 return ck
-            # salah klik / gambar baru → lanjut iterasi
+            # salah klik / gambar baru → putaran berikut utamakan AI
+            prefer_ai = True
             time.sleep(0.8 + random.random() * 0.7)
         return ck
 

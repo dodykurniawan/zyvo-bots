@@ -33,3 +33,6 @@ clipcoin/bot.log
 clipcoin/clipcoin_secret.txt
 scrapper/state_*.json
 scrapper/suite.log
+
+# file kerja captcha AI clipcoin (auto-hapus, jangan masuk repo)
+clipcoin/_ai_*
