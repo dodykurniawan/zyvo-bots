@@ -47,3 +47,13 @@ takeover:
     - pip install -q requests pillow numpy
     # 3) 5 bot paralel + notifikasi TG hasil takeover
     - bash scripts/gitlab_takeover.sh
+
+# Pipeline dari push = kosong (tak ada job match) → GitLab tandai
+# "failed" merah. Job noop ini biar badge push tetap hijau.
+noop-push:
+  stage: takeover
+  image: alpine:3.20
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+  script:
+    - echo "push diterima — bot hanya jalan via schedule / api / TAKEOVER=1"
