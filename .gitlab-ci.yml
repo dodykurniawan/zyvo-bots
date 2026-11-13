@@ -30,7 +30,8 @@ takeover:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
     - if: '$CI_PIPELINE_SOURCE == "web"'
-    - if: '$TAKEOVER == "1"'   # trigger API manual (tes dari luar)
+    - if: '$CI_PIPELINE_SOURCE == "api"'    # tes dari zyvo (curl/API)
+    - if: '$TAKEOVER == "1"'   # trigger API manual (tes takeover)
   script:
     # 1) GATE — harus SEBELUM pip install biar yang sehat cuma bayar
     #    image pull + detik pertama. exit 1 (GH sehat) → job berhenti
