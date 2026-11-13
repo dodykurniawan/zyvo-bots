@@ -1,0 +1,48 @@
+# Rotasi CI zyvo-bots — GitHub Actions TETAP primary (jadwal `17 */6`
+# UTC di .github/workflows/bots.yml, TIDAK diubah). GitLab ini cuma
+# CADANGAN BERTUKERAN: schedule `17 3,9,15,21` UTC (= slot GH + 3 jam,
+# nunggu GH yang telat sempat jalan dulu), lalu gate (ci_gate.py)
+# memutuskan: GH masih sehat → keluar hijau tanpa jalan; GH mati →
+# TAKEOVER, 5 bot jalan paralel di 1 job (hemat kuota 400 mnt/bln).
+#
+# Butuh CI/CD variable (Settings → CI/CD → Variables), 12 buah:
+#   GH_TOKEN CF_EMAIL CF_PASSWORD CTD_EMAIL CTD_PASSWORD CTD_COOKIE
+#   LM_CONFIG_JSON GEMINI_KEY SOLVERCF_KEY CLIPCOIN_PASSWORD
+#   TG_BOT_TOKEN TG_CHAT_ID
+# Variabel opsional: TEST=1 (bot --once, test singkat),
+# FORCE=1 (paksa takeover walau GH sehat).
+stages: [takeover]
+
+variables:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_INPUT: "1"
+
+takeover:
+  stage: takeover
+  image: nikolaik/python-nodejs:python3.11-nodejs20
+  # hosted runner GitLab hard-cap 3 jam; sisakan margin utk cleanup
+  timeout: 170 minutes
+  retry:
+    max: 1
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$TAKEOVER == "1"'   # trigger API manual (tes dari luar)
+  script:
+    # 1) GATE — harus SEBELUM pip install biar yang sehat cuma bayar
+    #    image pull + detik pertama. exit 1 (GH sehat) → job berhenti
+    #    hijau, bot TIDAK jalan.
+    - |
+      if python3 scripts/ci_gate.py; then
+        echo "==> TAKEOVER — GH tidak ada run dalam 5 jam terakhir"
+      else
+        echo "==> GH sehat — rotasi bergantian: GitLab dilewati (hijau)"
+        exit 0
+      fi
+    # 2) deps (cuma dijalankan kalau takeover)
+    - pip install -q requests pillow numpy
+    # 3) 5 bot paralel + notifikasi TG hasil takeover
+    - bash scripts/gitlab_takeover.sh
