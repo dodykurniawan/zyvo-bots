@@ -13,6 +13,26 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p logs
 
+# --- anti-dobel: bot yang SUDAH jalan lokal (failover) jangan di-start --
+# Runner GitLab = HP yg sama dgn failover_watch → kalau GH mati, failover
+# sudah menyalakan bot lokal; takeover cuma mengisi yang mati.
+declare -A SKIP
+check_skip() {
+  if pgrep -f "$2" >/dev/null 2>&1; then
+    SKIP[$1]=1
+    echo "==> $1 DILEWATI — sudah jalan lokal (failover): $2"
+  fi
+}
+check_skip cf   'cryptofisher_(premium|level|auto2?)\.py'
+check_skip ctd  'ctd_auto\.py'
+check_skip lm   'lightningminer_auto\.py'
+check_skip clip 'clipcoin_auto\.py'
+check_skip scrp 'scrapper_auto\.py'
+if [ "${#SKIP[@]}" -ge 5 ]; then
+  echo "==> semua 5 bot sudah jalan lokal — takeover tidak perlu, hijau"
+  exit 0
+fi
+
 # --- wajib: minimal yang dibutuhkan untuk jalan -------------------------
 : "${CF_EMAIL:?CF_EMAIL kosong (set CI/CD variable)}"
 : "${CTD_EMAIL:?CTD_EMAIL kosong}"
@@ -73,9 +93,17 @@ PY
 [ $? -eq 0 ] || exit 11
 
 # --- self-heal singkat (sesi mati → relogin) sebelum bot ---------------
-python3 -u scripts/selfheal.py --only cf  2>&1 | sed -u 's/^/[heal-cf] /'  || true
-python3 -u scripts/selfheal.py --only ctd 2>&1 | sed -u 's/^/[heal-ctd] /' || true
-python3 -u scripts/selfheal.py --only lm  2>&1 | sed -u 's/^/[heal-lm] /'  || true
+# Bot lokal yang sedang jalan TIDAK di-heal (relogin memutar sesi di
+# bawahnya → bikin bot lokal error).
+if [ -z "${SKIP[cf]:-}" ]; then
+  python3 -u scripts/selfheal.py --only cf  2>&1 | sed -u 's/^/[heal-cf] /'  || true
+fi
+if [ -z "${SKIP[ctd]:-}" ]; then
+  python3 -u scripts/selfheal.py --only ctd 2>&1 | sed -u 's/^/[heal-ctd] /' || true
+fi
+if [ -z "${SKIP[lm]:-}" ]; then
+  python3 -u scripts/selfheal.py --only lm  2>&1 | sed -u 's/^/[heal-lm] /' || true
+fi
 
 # --- jalankan 5 bot paralel --------------------------------------------
 # Semua output di-stream ke log GitLab (biar job tidak di-drop 1 jam
@@ -86,6 +114,7 @@ ARGS=""
 
 run_bot() {
   local name="$1" dir="$2"; shift 2
+  [ -n "${SKIP[$name]:-}" ] && return 0
   (
     ec=99
     for try in 1 2; do
@@ -115,9 +144,15 @@ run_bot lm   lightningminer       lightningminer_auto.py --interval 180
 run_bot clip clipcoin             clipcoin_auto.py --interval 180
 run_bot scrp scrapper             scrapper_auto.py --site all --interval 180
 
-echo "==> 5 bot berjalan paralel (TEST=$TEST, timeout per bot $TMO)"
+N_RUN=$(( 5 - ${#SKIP[@]} ))
+echo "==> $N_RUN bot berjalan paralel (dilewati lokal: ${#SKIP[@]}, TEST=$TEST, timeout per bot $TMO)"
 FAIL=0
 for n in cf ctd lm clip scrp; do
+  if [ -n "${SKIP[$n]:-}" ]; then
+    RC[$n]=0
+    echo "===> $n dilewati (sudah jalan lokal)"
+    continue
+  fi
   wait "${PID[$n]}"; rc=$?
   RC[$n]=$rc
   if [ "$rc" -ne 0 ]; then FAIL=$((FAIL + 1)); fi
@@ -128,14 +163,18 @@ done
 pkill -f "[c]td_run_bot.mjs" 2>/dev/null || true
 
 # --- notifikasi Telegram (1 pesan hasil takeover) -----------------------
-badge() { if [ "$1" -eq 0 ]; then echo "✅ sukses"; else echo "❌ gagal (rc=$1)"; fi; }
+badge() {
+  if [ -n "${SKIP[$1]:-}" ]; then echo "⏭️ dilewati (lokal jalan)"
+  elif [ "$2" -eq 0 ]; then echo "✅ sukses"
+  else echo "❌ gagal (rc=$2)"; fi
+}
 BAL=$(python3 scripts/balance_all.py 2>/dev/null | tail -6 || true)
 TEXT="🔁 TAKEOVER GitLab (GitHub Actions mati)
-🎣 CF:   $(badge "${RC[cf]}")
-🛡️ CTD:  $(badge "${RC[ctd]}")
-⛏️ LM:   $(badge "${RC[lm]}")
-🪙 clip: $(badge "${RC[clip]}")
-🦎 scrp: $(badge "${RC[scrp]}")
+🎣 CF:   $(badge cf "${RC[cf]}")
+🛡️ CTD:  $(badge ctd "${RC[ctd]}")
+⛏️ LM:   $(badge lm "${RC[lm]}")
+🪙 clip: $(badge clip "${RC[clip]}")
+🦎 scrp: $(badge scrp "${RC[scrp]}")
 $BAL
 🕐 $(date -u '+%Y-%m-%d %H:%M UTC')
 🔗 ${CI_PIPELINE_URL:-gitlab}"
