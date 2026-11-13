@@ -17,9 +17,13 @@ mkdir -p logs
 # Runner GitLab = HP yg sama dgn failover_watch → kalau GH mati, failover
 # sudah menyalakan bot lokal; takeover cuma mengisi yang mati.
 declare -A SKIP
+N_SKIP=0   # counter manual — "${#arr[@]}" pada assoc array KOSONG di
+           # bash 5.3 + `set -u` = fatal "unbound variable" (bug 13-11:
+           # shell mati stlh bot jalan → job exit 1, TG tak terkirim)
 check_skip() {
   if pgrep -f "$2" >/dev/null 2>&1; then
     SKIP[$1]=1
+    N_SKIP=$((N_SKIP + 1))
     echo "==> $1 DILEWATI — sudah jalan lokal (failover): $2"
   fi
 }
@@ -28,7 +32,7 @@ check_skip ctd  'ctd_auto\.py'
 check_skip lm   'lightningminer_auto\.py'
 check_skip clip 'clipcoin_auto\.py'
 check_skip scrp 'scrapper_auto\.py'
-if [ "${#SKIP[@]}" -ge 5 ]; then
+if [ "$N_SKIP" -ge 5 ]; then
   echo "==> semua 5 bot sudah jalan lokal — takeover tidak perlu, hijau"
   exit 0
 fi
@@ -144,8 +148,8 @@ run_bot lm   lightningminer       lightningminer_auto.py --interval 180
 run_bot clip clipcoin             clipcoin_auto.py --interval 180
 run_bot scrp scrapper             scrapper_auto.py --site all --interval 180
 
-N_RUN=$(( 5 - ${#SKIP[@]} ))
-echo "==> $N_RUN bot berjalan paralel (dilewati lokal: ${#SKIP[@]}, TEST=$TEST, timeout per bot $TMO)"
+N_RUN=$(( 5 - N_SKIP ))
+echo "==> $N_RUN bot berjalan paralel (dilewati lokal: $N_SKIP, TEST=$TEST, timeout per bot $TMO)"
 FAIL=0
 for n in cf ctd lm clip scrp; do
   if [ -n "${SKIP[$n]:-}" ]; then
@@ -170,11 +174,11 @@ badge() {
 }
 BAL=$(python3 scripts/balance_all.py 2>/dev/null | tail -6 || true)
 TEXT="🔁 TAKEOVER GitLab (GitHub Actions mati)
-🎣 CF:   $(badge cf "${RC[cf]}")
-🛡️ CTD:  $(badge ctd "${RC[ctd]}")
-⛏️ LM:   $(badge lm "${RC[lm]}")
-🪙 clip: $(badge clip "${RC[clip]}")
-🦎 scrp: $(badge scrp "${RC[scrp]}")
+🎣 CF:   $(badge cf "${RC[cf]:-1}")
+🛡️ CTD:  $(badge ctd "${RC[ctd]:-1}")
+⛏️ LM:   $(badge lm "${RC[lm]:-1}")
+🪙 clip: $(badge clip "${RC[clip]:-1}")
+🦎 scrp: $(badge scrp "${RC[scrp]:-1}")
 $BAL
 🕐 $(date -u '+%Y-%m-%d %H:%M UTC')
 🔗 ${CI_PIPELINE_URL:-gitlab}"
