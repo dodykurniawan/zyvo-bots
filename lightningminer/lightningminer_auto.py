@@ -469,6 +469,7 @@ def nopecha_turnstile(key: str, sitekey: str, url: str,
 SOLVER_ORDER = (
     ("local_ts_url", "Local"),
     ("xsolve_key", "Xsolve"),
+    ("solvercf_key", "SolverCF"),
     ("nocaptchaai_key", "NoCaptchaAI"),
     ("peak_key", "Peak"),
     ("capsolver_key", "CapSolver"),
@@ -672,9 +673,51 @@ def _solve_xsolves(key: str, sitekey: str, url: str,
     raise RuntimeError(f"xsolve HTTP {r.status_code}: {j}")
 
 
+def _solve_solvercf(key: str, sitekey: str, url: str,
+                    action: Optional[str], cdata: Optional[str]) -> str:
+    """solvercf (terbukti 2026-11-12 utk CTD/clipcoin/nocid — xsolve+peak
+    keduanya 402/500, solvercf tetap hijau).
+
+    Field WAJIB: pageAction (bukan "action") + data; userAgent = UA sesi
+    submit (mismatch → server tolak token).
+    """
+    task: dict = {"type": "TurnstileTask", "websiteUrl": url,
+                  "websiteKey": sitekey, "userAgent": UA}
+    if action:
+        task["pageAction"] = action
+    if cdata:
+        task["data"] = cdata
+    base = "https://solvercf.com/token/extension"
+    r = requests.post(f"{base}/createTask",
+                      json={"clientKey": key, "task": task}, timeout=30)
+    j = r.json()
+    tid = j.get("taskId")
+    if not tid:
+        raise RuntimeError(f"solvercf create: {str(j)[:160]}")
+    t0 = time.time()
+    while time.time() - t0 < 90:
+        time.sleep(3)
+        p = requests.post(f"{base}/getTaskResult",
+                          json={"clientKey": key, "taskId": tid},
+                          timeout=30).json()
+        if p.get("status") == "ready":
+            tok = (p.get("solution") or {}).get("token") or ""
+            if tok:
+                return tok
+            raise RuntimeError("solvercf ready tanpa token")
+        if p.get("status") == "failed":
+            raise RuntimeError(
+                f"solvercf failed: {p.get('errorCode')} "
+                f"{p.get('errorDescription') or p.get('error') or ''}")
+        if p.get("errorId") not in (0, None, "0"):
+            raise RuntimeError(f"solvercf: {str(p)[:160]}")
+    raise RuntimeError("solvercf: timeout polling")
+
+
 _SOLVERS = {
     "local_ts_url": _solve_local_turnstile,
     "xsolve_key": _solve_xsolves,
+    "solvercf_key": _solve_solvercf,
     "nocaptchaai_key": _solve_nocaptchaai,
     "peak_key": _solve_peak,
     "capsolver_key": _solve_capsolver,

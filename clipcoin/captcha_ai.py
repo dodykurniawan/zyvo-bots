@@ -463,6 +463,54 @@ def mode_selftest(args) -> str:
          f"GAGAL (harus {truth}, dapat '{ans}')")
 
 
+# ------------------------------------- universal_solver (OCR/math/grid) ---
+# Port Python Universal Captcha Solver (quantavil/userscript) — teks
+# terdistorsi, aritmetika, grid bernomor. Satu sumber kebenaran di
+# sites/universal_solver/universal_solver.py; modul dimuat lazy via path.
+UNIVERSAL_SOLVER = os.environ.get(
+    "UNIVERSAL_SOLVER",
+    "/storage/emulated/0/Download/ZYVO/sites/universal_solver/"
+    "universal_solver.py")
+_univ = None
+
+
+def _load_universal():
+    global _univ
+    if _univ is None:
+        import importlib.util
+        if not os.path.isfile(UNIVERSAL_SOLVER):
+            raise RuntimeError(
+                f"universal_solver.py tidak ada: {UNIVERSAL_SOLVER}")
+        spec = importlib.util.spec_from_file_location(
+            "universal_solver", UNIVERSAL_SOLVER)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _univ = mod
+    return _univ
+
+
+def mode_ocr(args):
+    u = _load_universal()
+    ans = u.solve_image(args.file, "text", args.charset, args.case,
+                        args.min_len, args.max_len, args.hint or "",
+                        args.provider)
+    return json.dumps({"ok": True, "answer": ans}) if args.json else ans
+
+
+def mode_math(args):
+    u = _load_universal()
+    ans = u.solve_math(args.file, args.hint or "", args.provider)
+    return json.dumps({"ok": True, "answer": ans}) if args.json else ans
+
+
+def mode_grid(args):
+    u = _load_universal()
+    tiles = u.solve_grid(args.file, args.task, args.size, args.hint or "",
+                         args.tiles, args.provider)
+    return json.dumps({"ok": True, "answer": tiles}) if args.json \
+        else json.dumps(tiles)
+
+
 # ------------------------------------------------------------------- main ---
 
 def main():
@@ -518,10 +566,43 @@ def main():
     p = sub.add_parser("selftest", parents=[common],
                        help="uji AI baca captcha sintetis")
 
+    p = sub.add_parser("ocr", parents=[common],
+                       help="OCR teks terdistorsi (universal_solver)")
+    p.add_argument("file")
+    p.add_argument("--charset", choices=["alnum", "alpha", "digits", "any"],
+                   default="alnum")
+    p.add_argument("--case", choices=["any", "upper", "lower"], default="any")
+    p.add_argument("--min", dest="min_len", type=int, default=0)
+    p.add_argument("--max", dest="max_len", type=int, default=0)
+    p.add_argument("--hint", default="")
+    p.add_argument("--provider", choices=["auto", "gemini", "keyless"],
+                   default="auto")
+
+    p = sub.add_parser("math", parents=[common],
+                       help="hitung aritmetika di gambar (universal_solver)")
+    p.add_argument("file")
+    p.add_argument("--hint", default="")
+    p.add_argument("--provider", choices=["auto", "gemini", "keyless"],
+                   default="auto")
+
+    p = sub.add_parser("grid", parents=[common],
+                       help="grid tile bernomor → daftar nomor JSON")
+    p.add_argument("file")
+    p.add_argument("--task", required=True,
+                   help='mis: "Select all images with buses"')
+    p.add_argument("--size", type=int, default=0,
+                   help="tile per sisi (0 = otomatis √n)")
+    p.add_argument("--tiles", type=int, default=0,
+                   help="jumlah total tile (kalau diketahui)")
+    p.add_argument("--hint", default="")
+    p.add_argument("--provider", choices=["auto", "gemini", "keyless"],
+                   default="auto")
+
     args = ap.parse_args()
     fn = {"image": mode_image, "click": mode_click, "match": mode_match,
           "turnstile": mode_turnstile, "hcaptcha": mode_hcaptcha,
-          "balance": mode_balance, "selftest": mode_selftest}[args.cmd]
+          "balance": mode_balance, "selftest": mode_selftest,
+          "ocr": mode_ocr, "math": mode_math, "grid": mode_grid}[args.cmd]
     try:
         out = fn(args)
     except Exception as e:
