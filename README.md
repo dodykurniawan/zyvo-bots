@@ -17,6 +17,7 @@ dobel). **Limefaucet selalu di HP**, tidak ada di Actions (IP ditolak).
 | `clip` | `clipcoin/clipcoin_auto.py` | clipcoin.pro watch + image captcha CV + auto WD USDT BEP20 |
 | `scrp` | `scrapper/scrapper_auto.py` | 5 situs scrapper (BTC/PEPE/TRX/DOGE/LTC) passwordless |
 | *(HP only)* | `limefaucet_auto.py` | Lime rotasi captcha + YouTube (IP Actions ditolak) |
+| *(HP only)* | `earnempire/earnempire_auto.py` | EarnEmpire upgrade desa + pool koin + auto WD (timer game pendek) |
 
 ## Cara kerja
 

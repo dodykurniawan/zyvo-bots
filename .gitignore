@@ -34,5 +34,16 @@ clipcoin/clipcoin_secret.txt
 scrapper/state_*.json
 scrapper/suite.log
 
+# earnempire — password/cookie di HP saja (jalur lokal, bukan Actions)
+earnempire/config.json
+earnempire/state.json
+earnempire/bot.log
+earnempire/bot.out
+earnempire/ee_*.html
+earnempire/ee_*.js
+earnempire/ee_*.txt
+earnempire/ee_*.json
+earnempire/signin_resp.json
+
 # file kerja captcha AI clipcoin (auto-hapus, jangan masuk repo)
 clipcoin/_ai_*
