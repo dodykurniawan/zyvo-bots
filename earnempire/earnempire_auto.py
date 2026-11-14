@@ -48,11 +48,13 @@ BUILD_ORDER = [
     "barracks_archer", "barracks_cavalry",
 ]
 # Prioritas upgrade (fokus user): inti dulu, lalu penghasil, lalu sisanya.
+# Barracks/camp/expedition di depan — gold murah (20–130) → power besar,
+# power = share pool crystal (jalur WD).
 UPGRADE_ORDER = [
-    "town_hall", "gold_mine", "crystal_mine", "ruby_mine", "emerald_mine",
+    "town_hall", "barracks_infantry", "barracks_archer", "barracks_cavalry",
+    "expedition_hall", "camp",
+    "gold_mine", "crystal_mine", "ruby_mine", "emerald_mine",
     "sawmill", "farm", "warehouse", "market", "research_lab",
-    "barracks_infantry", "camp", "expedition_hall",
-    "barracks_archer", "barracks_cavalry",
 ]
 GEMS = ("crystal", "ruby", "emerald")
 
@@ -411,6 +413,104 @@ class EE:
         except RuntimeError as e:
             log(f"  allocation: {e}")
 
+    # --------------------------------------------------- youtube wall ---
+    def youtube_pass(self) -> float:
+        """Runner aviso.bz (widget YouTube di PTC tab youtube) → GOLD.
+        Gold = bahan upgrade → power naik → pool crystal naik → WD cepat.
+        Flow: widget attrs → identify → available → start → timer → complete."""
+        try:
+            r = self.s.get(f"{BASE}/dashboard/ptc?tab=youtube", timeout=30)
+            wm = re.search(r'<div class="ee-av__widget"[^>]*>', r.text)
+            if not wm:
+                return 0.0
+            attrs = dict(re.findall(r'data-([a-z-]+)="([^"]*)"', wm.group(0)))
+            api = attrs.get("api-endpoint") or "https://aviso.bz/api/v1"
+            key = attrs.get("api-key") or ""
+            hsh = (attrs.get("user-hash") or "").lower()
+            uid = attrs.get("user-id") or ""
+            sig = attrs.get("user-sig") or ""
+            if not (key and hsh and uid and sig):
+                return 0.0
+        except Exception as e:
+            log(f"  yt widget: {e}")
+            return 0.0
+
+        plat = "Linux aarch64"
+        H = {"X-API-Key": key, "Accept-Language": "en",
+             "Content-Type": "application/json", "User-Agent": UA}
+        earned = 0.0
+        try:
+            self.s.post(f"{api}/youtube/tasks/identify", json={
+                "hash": hsh, "ip": None, "userAgent": UA,
+                "fingerprint": None}, headers=H, timeout=20)
+        except Exception as e:
+            log(f"  yt identify: {e}")
+            return 0.0
+
+        for typ in ("ads", "like", "sub"):
+            try:
+                rr = self.s.get(
+                    f"{api}/youtube/tasks/available",
+                    params={"hash": hsh, "type": typ, "platform": plat},
+                    headers=H, timeout=20)
+                tasks = (rr.json().get(typ) or [])
+            except Exception as e:
+                log(f"  yt available {typ}: {e}")
+                continue
+            if not tasks:
+                continue
+            log(f"  YT {typ}: {len(tasks)} task")
+            for task in tasks[:12]:  # batas per cycle — pacing
+                body = {"taskId": task["id"], "hash": hsh, "type": typ,
+                        "platform": plat, "userId": int(uid), "userSig": sig}
+                try:
+                    rr = self.s.post(f"{api}/youtube/tasks/start",
+                                     json=body, headers=H, timeout=20)
+                    st = rr.json()
+                    attempt = st.get("attemptId")
+                    if not attempt:
+                        log(f"  yt {typ} start: "
+                            f"{(st.get('error') or rr.text)[:100]}")
+                        continue
+                    dur = int(task.get("duration") or 5) or 3
+                    pace(1.0, 2.0)
+                    self.s.post(f"{api}/youtube/tasks/timer-status",
+                                json={"attemptId": attempt,
+                                      "action": "start", "watchedTime": 0},
+                                headers=H, timeout=15)
+                    time.sleep(dur + 0.8)
+                    self.s.post(f"{api}/youtube/tasks/timer-status",
+                                json={"attemptId": attempt,
+                                      "watchedTime": dur},
+                                headers=H, timeout=15)
+                    rr = self.s.post(f"{api}/youtube/tasks/complete",
+                                     json={"attemptId": attempt},
+                                     headers=H, timeout=20)
+                    j = rr.json()
+                    if j.get("earned") is not None:
+                        got = float(j["earned"])
+                        earned += got
+                        log(f"  YT {typ} +{got} "
+                            f"{j.get('currencySymbol') or ''}")
+                    elif j.get("code") == "subscribe_check_retry":
+                        time.sleep(6)
+                        rr = self.s.post(
+                            f"{api}/youtube/tasks/complete",
+                            json={"attemptId": attempt},
+                            headers=H, timeout=20)
+                        j = rr.json()
+                        if j.get("earned") is not None:
+                            earned += float(j["earned"])
+                            log(f"  YT {typ} (retry) +{j['earned']}")
+                    else:
+                        log(f"  yt {typ} complete: "
+                            f"{(j.get('error') or j)[:100]}")
+                    time.sleep(1.5)
+                except Exception as e:
+                    log(f"  yt {typ} task: {e}")
+                    time.sleep(2)
+        return earned
+
     def market_pass(self, state: dict) -> int:
         """Jual semua gem kalau nilainya ≥ min jual ($0.01) → saldo USD."""
         m = state.get("market") or {}
@@ -574,6 +674,9 @@ class EE:
 
         stats["built"] = self.build_pass(state)
         state = self.api("state", method="GET")
+        stats.setdefault("yt_gold", 0.0)
+        stats["yt_gold"] = self.youtube_pass()  # gold dulu → upgrade cycle ini
+        state = self.api("state", method="GET")
         stats["upgraded"] = self.upgrade_pass(state)
         state = self.api("state", method="GET")
         self.energy_collect()
@@ -597,6 +700,7 @@ class EE:
             f"food={res.get('food')} crystal={res.get('crystal')} "
             f"ruby={res.get('ruby')} emerald={res.get('emerald')} "
             f"USD={m.get('usd')} power={u.get('power')} "
+            f"yt+{stats.get('yt_gold') or 0} "
             f"| bangunan: " +
             ", ".join(f"{k}v{v}" for k, v in sorted(bset.items())))
 
